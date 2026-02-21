@@ -920,6 +920,17 @@ const App = {
       html += `</div>`;
     }
 
+    // Data section
+    html += `<div class="section-label">Data</div>`;
+    html += `<div class="card mb-0" style="padding:0">
+      <div class="setting-row" style="border-bottom:none">
+        <div class="setting-label">Import JSON</div>
+        <button class="setting-row-btn" onclick="document.getElementById('import-file-input').click()">Choose file</button>
+      </div>
+    </div>`;
+    html += `<input type="file" id="import-file-input" accept=".json,application/json"
+      style="display:none" onchange="App.importData(this)" />`;
+
     html += `<div style="height:20px"></div>`;
     document.getElementById('settings-content').innerHTML = html;
   },
@@ -936,6 +947,63 @@ const App = {
     await this.loadData();
     this.renderSettings();
     showToast('Synced ✓');
+  },
+
+  // ── Import JSON data file ─────────────────────────────────
+  importData(input) {
+    const file = input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      let parsed;
+      try {
+        parsed = JSON.parse(e.target.result);
+      } catch {
+        showToast('Invalid JSON file');
+        input.value = '';
+        return;
+      }
+
+      // Merge clients (add new, preserve existing by id)
+      if (Array.isArray(parsed.clients)) {
+        for (const c of parsed.clients) {
+          if (c.id && !State.clients.find(x => x.id === c.id)) {
+            State.clients.push(c);
+          }
+        }
+      }
+
+      // Merge projects (add new, preserve existing by id)
+      if (Array.isArray(parsed.projects)) {
+        for (const p of parsed.projects) {
+          if (p.id && !State.projects.find(x => x.id === p.id)) {
+            State.projects.push(p);
+          }
+        }
+      }
+
+      // Merge blocks (imported slots fill in; existing slots preserved)
+      if (parsed.blocks && typeof parsed.blocks === 'object') {
+        for (const [day, slots] of Object.entries(parsed.blocks)) {
+          if (!State.blocks[day]) State.blocks[day] = {};
+          for (const [slot, val] of Object.entries(slots)) {
+            if (!State.blocks[day][slot]) {
+              State.blocks[day][slot] = val;
+            }
+          }
+        }
+      }
+
+      input.value = '';
+      try {
+        await Gist.syncWithRetry();
+        this.renderSettings();
+        showToast('Data imported ✓');
+      } catch {
+        showToast('Import saved locally — sync failed');
+      }
+    };
+    reader.readAsText(file);
   },
 
   signOut() {
