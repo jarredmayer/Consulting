@@ -374,14 +374,11 @@ const App = {
     setSyncing(true);
     try {
       await Gist.load();
-      // Auto-seed historical data the first time blocks is empty
-      if (Object.keys(State.blocks).length === 0 &&
-          !LS.get('flow_seeded') &&
-          typeof SEED_DATA !== 'undefined') {
+      // Auto-seed historical data whenever blocks is empty
+      if (Object.keys(State.blocks).length === 0 && typeof SEED_DATA !== 'undefined') {
         State.clients  = SEED_DATA.clients;
         State.projects = SEED_DATA.projects;
         State.blocks   = SEED_DATA.blocks;
-        LS.set('flow_seeded', '1');
         await Gist.save();
       }
     } catch (err) {
