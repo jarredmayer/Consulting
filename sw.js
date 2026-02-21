@@ -1,8 +1,9 @@
-const CACHE_NAME = 'flow-v2';
+const CACHE_NAME = 'flow-v3';
 const STATIC_ASSETS = [
   '/Consulting/',
   '/Consulting/index.html',
-  '/Consulting/app.js?v=2',
+  '/Consulting/seed-data.js?v=3',
+  '/Consulting/app.js?v=3',
   '/Consulting/manifest.json'
 ];
 
