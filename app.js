@@ -380,6 +380,10 @@ const App = {
         State.projects = SEED_DATA.projects;
         State.blocks   = SEED_DATA.blocks;
         await Gist.save();
+        // Navigate to the most recent day that has data
+        const lastDay = Object.keys(State.blocks).sort().pop();
+        if (lastDay) State.currentDay = new Date(lastDay + 'T12:00:00');
+        showToast(`Loaded ${Object.keys(State.blocks).length} days of history`);
       }
     } catch (err) {
       showToast('Could not load data: ' + err.message);
