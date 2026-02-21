@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Flow" />
+  <meta name="theme-color" content="#0a0a0f" />
+  <title>Flow</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <style>
+    /* ─── Reset & Base ─────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:          #0a0a0f;
+      --bg2:         #13131a;
+      --bg3:         #1c1c26;
+      --border:      #2a2a38;
+      --text:        #f0f0f8;
+      --text2:       #8888a8;
+      --text3:       #55556a;
+      --accent:      #6c63ff;
+      --accent2:     #9d97ff;
+      --success:     #34d399;
+      --danger:      #f87171;
+      --radius:      12px;
+      --radius-sm:   8px;
+      --tab-h:       60px;
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-top:    env(safe-area-inset-top, 0px);
+      --font:        -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+    }
+    html, body {
+      height: 100%; width: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      -webkit-font-smoothing: antialiased;
+      font-size: 16px;
+    }
+
+    /* ─── App Shell ────────────────────────────────── */
+    #app {
+      display: flex; flex-direction: column;
+      height: 100%; width: 100%;
+      max-width: 430px; margin: 0 auto;
+      position: relative; overflow: hidden;
+    }
+
+    /* ─── Screens ──────────────────────────────────── */
+    .screen {
+      display: none; flex-direction: column;
+      flex: 1; overflow: hidden;
+      padding-top: var(--safe-top);
+    }
+    .screen.active { display: flex; }
+
+    .screen-header {
+      padding: 16px 20px 12px;
+      display: flex; align-items: center; justify-content: space-between;
+      flex-shrink: 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .screen-title {
+      font-size: 28px; font-weight: 700; letter-spacing: -0.5px;
+    }
+    .screen-scroll {
+      flex: 1; overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .screen-scroll::-webkit-scrollbar { display: none; }
+
+    /* ─── Bottom Tab Bar ───────────────────────────── */
+    #tab-bar {
+      display: flex; align-items: flex-start;
+      height: calc(var(--tab-h) + var(--safe-bottom));
+      padding-bottom: var(--safe-bottom);
+      background: rgba(19,19,26,0.92);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-top: 1px solid var(--border);
+      flex-shrink: 0; z-index: 100;
+    }
+    .tab-btn {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 3px; height: var(--tab-h);
+      background: none; border: none; cursor: pointer;
+      color: var(--text3); transition: color 0.15s;
+      -webkit-tap-highlight-color: transparent;
+      font-family: var(--font);
+    }
+    .tab-btn.active { color: var(--accent2); }
+    .tab-btn svg { width: 22px; height: 22px; }
+    .tab-label { font-size: 10px; font-weight: 500; letter-spacing: 0.3px; }
+
+    /* ─── Cards & Sections ─────────────────────────── */
+    .card {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 16px;
+      margin: 0 16px 12px;
+    }
+    .section-label {
+      font-size: 12px; font-weight: 600; letter-spacing: 0.8px;
+      text-transform: uppercase; color: var(--text3);
+      padding: 16px 20px 8px;
+    }
+
+    /* ─── Buttons ──────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 6px; padding: 12px 20px;
+      border-radius: var(--radius-sm); border: none; cursor: pointer;
+      font-family: var(--font); font-size: 15px; font-weight: 600;
+      transition: opacity 0.15s, transform 0.1s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn:active { transform: scale(0.97); opacity: 0.85; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-secondary { background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
+    .btn-danger { background: rgba(248,113,113,0.15); color: var(--danger); border: 1px solid rgba(248,113,113,0.3); }
+    .btn-full { width: 100%; }
+    .btn-sm { padding: 8px 14px; font-size: 13px; }
+
+    /* ─── Inputs ───────────────────────────────────── */
+    .input {
+      width: 100%; padding: 12px 14px;
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); color: var(--text);
+      font-family: var(--font); font-size: 15px;
+      outline: none; transition: border-color 0.15s;
+      -webkit-appearance: none;
+    }
+    .input:focus { border-color: var(--accent); }
+    .input::placeholder { color: var(--text3); }
+    label.field-label {
+      display: block; font-size: 13px; font-weight: 500;
+      color: var(--text2); margin-bottom: 6px;
+    }
+    .field { margin-bottom: 16px; }
+    select.input { cursor: pointer; }
+
+    /* ─── Modal ────────────────────────────────────── */
+    .modal-backdrop {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);
+      z-index: 200; align-items: flex-end; justify-content: center;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--bg2); border-radius: var(--radius) var(--radius) 0 0;
+      border: 1px solid var(--border); border-bottom: none;
+      width: 100%; max-width: 430px;
+      padding: 0 0 calc(20px + var(--safe-bottom));
+      transform: translateY(100%);
+      transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+    }
+    .modal-backdrop.open .modal { transform: translateY(0); }
+    .modal-handle {
+      width: 36px; height: 4px; border-radius: 2px;
+      background: var(--border); margin: 12px auto 4px;
+    }
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 20px 16px;
+    }
+    .modal-title { font-size: 18px; font-weight: 700; }
+    .modal-close {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: var(--bg3); border: none; cursor: pointer;
+      color: var(--text2); font-size: 16px;
+      display: flex; align-items: center; justify-content: center;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .modal-body { padding: 0 20px; }
+
+    /* ─── Timeline ─────────────────────────────────── */
+    #timeline-container {
+      flex: 1; overflow-y: auto; overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      position: relative;
+    }
+    #timeline-container::-webkit-scrollbar { display: none; }
+    .timeline-inner {
+      position: relative;
+      padding: 0 16px 20px;
+    }
+    .time-row {
+      display: grid; grid-template-columns: 48px 1fr;
+      gap: 8px; min-height: 44px; align-items: stretch;
+      border-top: 1px solid var(--border);
+    }
+    .time-row:first-child { border-top: none; }
+    .time-label {
+      font-size: 11px; color: var(--text3); font-weight: 500;
+      padding-top: 4px; text-align: right;
+      line-height: 1; flex-shrink: 0;
+    }
+    .time-block {
+      min-height: 44px; border-radius: 8px;
+      cursor: pointer; transition: background 0.15s, transform 0.1s;
+      display: flex; align-items: center; padding: 6px 10px;
+      font-size: 13px; font-weight: 500;
+      -webkit-tap-highlight-color: transparent;
+      position: relative; overflow: hidden;
+    }
+    .time-block.empty {
+      background: transparent;
+    }
+    .time-block.empty:active { background: var(--bg3); transform: scale(0.98); }
+    .time-block.filled {
+      cursor: pointer;
+    }
+    .time-block.calendar-event {
+      cursor: default; opacity: 0.85;
+    }
+    .time-block-content { display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
+    .block-client { font-size: 11px; font-weight: 600; opacity: 0.8; text-transform: uppercase; letter-spacing: 0.4px; }
+    .block-project { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .block-notes { font-size: 11px; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .block-cal-title { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* ─── Day Nav ──────────────────────────────────── */
+    .day-nav {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 16px 8px; flex-shrink: 0;
+    }
+    .day-nav-btn {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: var(--bg3); border: 1px solid var(--border);
+      color: var(--text); font-size: 18px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .day-nav-btn:active { opacity: 0.6; }
+    .day-nav-center { text-align: center; }
+    .day-nav-date { font-size: 17px; font-weight: 700; }
+    .day-nav-sub { font-size: 12px; color: var(--text2); margin-top: 1px; }
+    .today-btn {
+      padding: 4px 10px; background: var(--accent); color: #fff;
+      border-radius: 20px; font-size: 11px; font-weight: 600;
+      border: none; cursor: pointer; margin-top: 4px;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* ─── Dashboard ────────────────────────────────── */
+    .stat-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 10px; padding: 0 16px 12px;
+    }
+    .stat-card {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 14px;
+    }
+    .stat-label { font-size: 11px; color: var(--text2); font-weight: 500; text-transform: uppercase; letter-spacing: 0.6px; }
+    .stat-value { font-size: 24px; font-weight: 700; margin-top: 4px; letter-spacing: -0.5px; }
+    .stat-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
+
+    .bar-chart { padding: 8px 4px 0; }
+    .bar-row {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 10px;
+    }
+    .bar-label { font-size: 12px; color: var(--text2); width: 90px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bar-track { flex: 1; height: 8px; background: var(--bg3); border-radius: 4px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+    .bar-val { font-size: 12px; color: var(--text); width: 48px; text-align: right; flex-shrink: 0; }
+
+    /* ─── Summary ──────────────────────────────────── */
+    .summary-client {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); margin: 0 16px 12px; overflow: hidden;
+    }
+    .summary-client-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 14px 16px; border-bottom: 1px solid var(--border);
+    }
+    .client-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .summary-client-name { font-size: 16px; font-weight: 700; flex: 1; }
+    .summary-client-total { font-size: 18px; font-weight: 700; color: var(--success); }
+    .summary-project-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 16px; border-bottom: 1px solid var(--border);
+      font-size: 14px;
+    }
+    .summary-project-row:last-child { border-bottom: none; }
+    .summary-proj-name { color: var(--text); }
+    .summary-proj-hours { color: var(--text2); font-size: 13px; }
+    .summary-proj-amount { color: var(--text); font-weight: 600; }
+
+    /* ─── Settings ─────────────────────────────────── */
+    .setting-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 16px; border-bottom: 1px solid var(--border);
+    }
+    .setting-row:last-child { border-bottom: none; }
+    .setting-label { font-size: 15px; }
+    .setting-value { font-size: 13px; color: var(--text2); }
+    .setting-row-btn { background: none; border: none; color: var(--accent2); font-size: 15px; font-weight: 500; cursor: pointer; font-family: var(--font); padding: 0; }
+
+    .client-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 16px; border-bottom: 1px solid var(--border);
+    }
+    .client-item:last-child { border-bottom: none; }
+    .client-color-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+    .client-name { flex: 1; font-size: 15px; font-weight: 500; }
+    .client-meta { font-size: 12px; color: var(--text2); }
+    .chevron { color: var(--text3); font-size: 16px; }
+    .project-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 16px; border-bottom: 1px solid var(--border);
+      background: var(--bg3);
+    }
+    .project-item:last-child { border-bottom: none; }
+
+    /* ─── Onboarding ───────────────────────────────── */
+    #onboarding {
+      display: none; position: fixed; inset: 0;
+      background: var(--bg); z-index: 500;
+      flex-direction: column; align-items: center; justify-content: center;
+      padding: 32px 24px calc(32px + var(--safe-bottom));
+    }
+    #onboarding.visible { display: flex; }
+    .onboard-logo { font-size: 48px; margin-bottom: 8px; }
+    .onboard-title { font-size: 32px; font-weight: 800; letter-spacing: -1px; margin-bottom: 6px; }
+    .onboard-sub { font-size: 15px; color: var(--text2); margin-bottom: 40px; text-align: center; }
+    .onboard-form { width: 100%; max-width: 360px; }
+    .onboard-step { display: none; }
+    .onboard-step.active { display: block; }
+    .onboard-note { font-size: 12px; color: var(--text3); margin-top: 8px; line-height: 1.5; }
+
+    /* ─── Month Picker ─────────────────────────────── */
+    .month-nav {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 16px 8px;
+    }
+    .month-label { font-size: 18px; font-weight: 700; }
+    .month-nav-btn {
+      width: 32px; height: 32px; border-radius: 50%;
+      background: var(--bg3); border: 1px solid var(--border);
+      color: var(--text); cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      -webkit-tap-highlight-color: transparent;
+      font-size: 16px;
+    }
+
+    /* ─── Toast ────────────────────────────────────── */
+    #toast {
+      position: fixed; bottom: calc(var(--tab-h) + var(--safe-bottom) + 12px);
+      left: 50%; transform: translateX(-50%) translateY(20px);
+      background: rgba(28,28,38,0.96); border: 1px solid var(--border);
+      border-radius: 20px; padding: 10px 18px;
+      font-size: 14px; font-weight: 500; color: var(--text);
+      z-index: 1000; opacity: 0; transition: opacity 0.25s, transform 0.25s;
+      white-space: nowrap; pointer-events: none;
+      backdrop-filter: blur(12px);
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* ─── Spinner ──────────────────────────────────── */
+    .spinner {
+      display: inline-block; width: 20px; height: 20px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%; animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ─── Color Swatch Picker ──────────────────────── */
+    .color-swatches { display: flex; flex-wrap: wrap; gap: 10px; padding: 8px 0; }
+    .color-swatch {
+      width: 32px; height: 32px; border-radius: 50%; cursor: pointer;
+      border: 3px solid transparent; transition: border-color 0.15s, transform 0.1s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .color-swatch.selected { border-color: #fff; transform: scale(1.1); }
+
+    /* ─── Swipe gesture overlay ────────────────────── */
+    #swipe-zone {
+      position: absolute; inset: 0;
+      pointer-events: none; z-index: 10;
+    }
+
+    /* ─── Loading state ────────────────────────────── */
+    .loading-row {
+      display: flex; align-items: center; justify-content: center;
+      gap: 10px; padding: 24px; color: var(--text2); font-size: 14px;
+    }
+
+    /* ─── Empty state ──────────────────────────────── */
+    .empty-state {
+      display: flex; flex-direction: column; align-items: center;
+      padding: 48px 24px; color: var(--text2); text-align: center; gap: 8px;
+    }
+    .empty-icon { font-size: 36px; margin-bottom: 4px; }
+    .empty-title { font-size: 16px; font-weight: 600; color: var(--text); }
+    .empty-sub { font-size: 14px; }
+
+    /* ─── Misc ─────────────────────────────────────── */
+    .divider { height: 1px; background: var(--border); margin: 4px 0; }
+    .flex-row { display: flex; gap: 10px; }
+    .flex-row > * { flex: 1; }
+    .text-success { color: var(--success); }
+    .text-danger { color: var(--danger); }
+    .text-accent { color: var(--accent2); }
+    .text-muted { color: var(--text2); }
+    .fw-700 { font-weight: 700; }
+    .fs-sm { font-size: 13px; }
+    .mt-8 { margin-top: 8px; }
+    .mb-0 { margin-bottom: 0; }
+
+    /* ─── Color input ──────────────────────────────── */
+    input[type="color"] {
+      -webkit-appearance: none; width: 40px; height: 40px;
+      border: none; border-radius: 50%; cursor: pointer;
+      background: none; padding: 0;
+    }
+    input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; border-radius: 50%; }
+    input[type="color"]::-webkit-color-swatch { border: none; border-radius: 50%; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <!-- Onboarding -->
+  <div id="onboarding">
+    <div class="onboard-logo">⏱</div>
+    <div class="onboard-title">Flow</div>
+    <div class="onboard-sub">Your consultant time tracker.<br>Let's connect your data store.</div>
+    <div class="onboard-form">
+      <!-- Step 1: PAT -->
+      <div class="onboard-step active" id="step-pat">
+        <div class="field">
+          <label class="field-label">GitHub Personal Access Token</label>
+          <input class="input" type="password" id="ob-pat" placeholder="ghp_xxxxxxxxxxxx" autocomplete="off" />
+          <div class="onboard-note">Create a token at GitHub → Settings → Developer settings → Personal access tokens. Requires <strong>gist</strong> scope only.</div>
+        </div>
+        <button class="btn btn-primary btn-full" onclick="App.onboardNextPAT()">Continue →</button>
+      </div>
+      <!-- Step 2: Gist -->
+      <div class="onboard-step" id="step-gist">
+        <div class="field">
+          <label class="field-label">Gist ID (optional)</label>
+          <input class="input" type="text" id="ob-gist" placeholder="Leave blank to create a new Gist" autocomplete="off" />
+          <div class="onboard-note">Paste an existing Gist ID to load previous data, or leave blank and we'll create a new private Gist for you.</div>
+        </div>
+        <div class="flex-row mt-8">
+          <button class="btn btn-secondary" onclick="App.onboardBack()">← Back</button>
+          <button class="btn btn-primary" id="ob-gist-btn" onclick="App.onboardFinish()">Get Started</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Screens -->
+  <div class="screen active" id="screen-today">
+    <div class="screen-header">
+      <div>
+        <div class="screen-title">Today</div>
+      </div>
+      <div id="sync-indicator" style="display:none"><div class="spinner"></div></div>
+    </div>
+    <div class="day-nav">
+      <button class="day-nav-btn" onclick="App.dayNav(-1)">‹</button>
+      <div class="day-nav-center">
+        <div class="day-nav-date" id="day-display"></div>
+        <div class="day-nav-sub" id="day-sub"></div>
+        <button class="today-btn" id="today-btn" onclick="App.goToday()" style="display:none">Today</button>
+      </div>
+      <button class="day-nav-btn" onclick="App.dayNav(1)">›</button>
+    </div>
+    <div id="timeline-container">
+      <div class="timeline-inner" id="timeline"></div>
+    </div>
+  </div>
+
+  <div class="screen" id="screen-dashboard">
+    <div class="screen-header">
+      <div class="screen-title">Dashboard</div>
+    </div>
+    <div class="screen-scroll" id="dashboard-content"></div>
+  </div>
+
+  <div class="screen" id="screen-summary">
+    <div class="screen-header">
+      <div class="screen-title">Summary</div>
+      <button class="btn btn-sm btn-secondary" onclick="App.exportCSV()">Export CSV</button>
+    </div>
+    <div class="month-nav">
+      <button class="month-nav-btn" onclick="App.summaryNav(-1)">‹</button>
+      <div class="month-label" id="summary-month-label"></div>
+      <button class="month-nav-btn" onclick="App.summaryNav(1)">›</button>
+    </div>
+    <div class="screen-scroll" id="summary-content"></div>
+  </div>
+
+  <div class="screen" id="screen-settings">
+    <div class="screen-header">
+      <div class="screen-title">Settings</div>
+    </div>
+    <div class="screen-scroll" id="settings-content"></div>
+  </div>
+
+  <!-- Tab Bar -->
+  <div id="tab-bar">
+    <button class="tab-btn active" data-tab="today" onclick="App.switchTab('today')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+      </svg>
+      <span class="tab-label">Today</span>
+    </button>
+    <button class="tab-btn" data-tab="dashboard" onclick="App.switchTab('dashboard')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+      </svg>
+      <span class="tab-label">Dashboard</span>
+    </button>
+    <button class="tab-btn" data-tab="summary" onclick="App.switchTab('summary')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
+      </svg>
+      <span class="tab-label">Summary</span>
+    </button>
+    <button class="tab-btn" data-tab="settings" onclick="App.switchTab('settings')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+      <span class="tab-label">Settings</span>
+    </button>
+  </div>
+</div>
+
+<!-- Block Modal -->
+<div class="modal-backdrop" id="block-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title" id="block-modal-title">Log Time</div>
+      <button class="modal-close" onclick="App.closeBlockModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label class="field-label">Client</label>
+        <select class="input" id="bm-client" onchange="App.blockModalClientChange()">
+          <option value="">Select client…</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label">Project</label>
+        <select class="input" id="bm-project">
+          <option value="">Select project…</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label">Notes (optional)</label>
+        <input class="input" type="text" id="bm-notes" placeholder="What did you work on?" />
+      </div>
+      <div class="flex-row mt-8" style="margin-bottom:12px">
+        <button class="btn btn-danger" id="bm-clear-btn" onclick="App.clearBlock()" style="display:none">Clear</button>
+        <button class="btn btn-primary btn-full" onclick="App.saveBlock()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Client Modal -->
+<div class="modal-backdrop" id="client-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title" id="client-modal-title">Add Client</div>
+      <button class="modal-close" onclick="App.closeClientModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label class="field-label">Client Name</label>
+        <input class="input" type="text" id="cm-name" placeholder="Acme Corp" />
+      </div>
+      <div class="field">
+        <label class="field-label">Color</label>
+        <div class="color-swatches" id="cm-swatches"></div>
+      </div>
+      <div class="field">
+        <label class="field-label">Hourly Rate (USD)</label>
+        <input class="input" type="number" id="cm-rate" placeholder="150" min="0" />
+      </div>
+      <div class="flex-row mt-8" style="margin-bottom:12px">
+        <button class="btn btn-danger" id="cm-delete-btn" onclick="App.deleteClient()" style="display:none">Delete</button>
+        <button class="btn btn-primary btn-full" onclick="App.saveClient()">Save Client</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Project Modal -->
+<div class="modal-backdrop" id="project-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title" id="project-modal-title">Add Project</div>
+      <button class="modal-close" onclick="App.closeProjectModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label class="field-label">Project Name</label>
+        <input class="input" type="text" id="pm-name" placeholder="Website Redesign" />
+      </div>
+      <div class="flex-row mt-8" style="margin-bottom:12px">
+        <button class="btn btn-danger" id="pm-delete-btn" onclick="App.deleteProject()" style="display:none">Delete</button>
+        <button class="btn btn-primary btn-full" onclick="App.saveProject()">Save Project</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
