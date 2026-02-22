@@ -992,17 +992,22 @@ const App = {
     const today       = new Date(); today.setHours(23, 59, 59, 999);
     const clampedEnd  = end < today ? end : today;
 
-    // Count elapsed weekdays (Mon–Fri) from start through clampedEnd
+    // Count elapsed weekdays (Mon–Fri) from start through clampedEnd (for avg/day)
+    // Count distinct Sun–Sat weeks touched by the range (for avg/week, weekend hrs count)
     let elapsedWeekdays = 0;
+    const weekSet = new Set();
     const d = new Date(start); d.setHours(0, 0, 0, 0);
     const ce = new Date(clampedEnd); ce.setHours(23, 59, 59, 999);
     while (d <= ce) {
       const dow = d.getDay();
       if (dow !== 0 && dow !== 6) elapsedWeekdays++;
+      // Roll back to Sunday to identify the Sun–Sat week
+      const sun = new Date(d); sun.setDate(d.getDate() - dow);
+      weekSet.add(sun.toISOString().slice(0, 10));
       d.setDate(d.getDate() + 1);
     }
     elapsedWeekdays = Math.max(1, elapsedWeekdays);
-    const elapsedWeeks = Math.max(1, elapsedWeekdays / 5);
+    const elapsedWeeks = Math.max(1, weekSet.size);
 
     const showEarn  = State.summaryShowEarnings;
     const fmt$      = v => '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
@@ -1150,9 +1155,9 @@ const App = {
     // Account section
     html += `<div class="section-label">Account</div>`;
     html += `<div class="card mb-0" style="padding:0">
-      <div class="setting-row">
+      <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:4px">
         <div class="setting-label">Gist ID</div>
-        <div class="setting-value">${State.gistId ? State.gistId.slice(0, 8) + '…' : '—'}</div>
+        <div style="font-size:12px;font-family:monospace;color:var(--text2);word-break:break-all;user-select:all;-webkit-user-select:all">${State.gistId || '—'}</div>
       </div>
       <div class="setting-row">
         <div class="setting-label">Sync</div>
