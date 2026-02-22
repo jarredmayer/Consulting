@@ -854,7 +854,7 @@ const App = {
       const client = getClient(clientId);
       if (client) total += hours * (client.rate || 0);
     }
-    return Math.round(total);
+    return total;
   },
 
   barChart(data, totalHours) {
