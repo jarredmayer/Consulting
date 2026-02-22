@@ -28,10 +28,11 @@ const State = {
   blocks:       {},   // { 'YYYY-MM-DD': { 'HH:MM': { clientId, projectId, notes } } }
   currentDay:   new Date(),
   summaryMonth: new Date(),
-  summaryRangeMode: 'month',    // 'week' | 'month' | 'quarter' | 'custom'
+  summaryRangeMode: 'month',    // 'week' | 'month' | 'quarter' | 'ytd' | 'custom'
   summaryRangeRef:  new Date(), // anchor date for week/month/quarter nav
   summaryCustomStart: null,
   summaryCustomEnd:   null,
+  summaryShowEarnings: false,   // toggle stat cards between hrs and $
   activeTab:    'today',
   calEvents:    [],   // parsed events for current day
   editingBlock: null, // { date, slot }
@@ -347,6 +348,12 @@ function getSummaryDateRange() {
       const end   = new Date(ref.getFullYear(), q * 3 + 3, 0);
       return { start, end };
     }
+    case 'ytd': {
+      const now   = new Date();
+      const start = new Date(now.getFullYear(), 0, 1);
+      const end   = now;
+      return { start, end };
+    }
     case 'custom': {
       const start = State.summaryCustomStart || startOfMonth(new Date());
       const end   = State.summaryCustomEnd   || endOfMonth(new Date());
@@ -367,6 +374,8 @@ function formatRangeLabel() {
       const q = Math.floor(start.getMonth() / 3) + 1;
       return `Q${q} ${start.getFullYear()}`;
     }
+    case 'ytd':
+      return `Jan 1 – ${formatShortDate(new Date())} ${new Date().getFullYear()}`;
     case 'custom':
       return `${formatShortDate(start)} – ${formatShortDate(end)}`;
     default:
@@ -903,15 +912,21 @@ const App = {
   },
 
   // ── Summary ──────────────────────────────────────────────
+  toggleSummaryEarnings() {
+    State.summaryShowEarnings = !State.summaryShowEarnings;
+    this.renderSummary();
+  },
+
   setSummaryRange(mode) {
     State.summaryRangeMode = mode;
     // Sync ref to current date when switching modes
     if (mode !== 'custom') State.summaryRangeRef = new Date();
 
-    // Toggle UI
+    // Toggle UI — hide nav arrows for ytd and custom (fixed ranges)
+    const noNav    = mode === 'custom' || mode === 'ytd';
     const navEl    = document.getElementById('summary-range-nav');
     const customEl = document.getElementById('summary-custom-row');
-    navEl.style.display    = mode === 'custom' ? 'none' : '';
+    navEl.style.display    = noNav ? 'none' : '';
     customEl.style.display = mode === 'custom' ? '' : 'none';
 
     // Highlight active seg button
@@ -972,6 +987,14 @@ const App = {
       return;
     }
 
+    // ── Computed stats ─────────────────────────────────────
+    const numDays   = Math.max(1, Math.round((end - start) / 86400000) + 1);
+    const numWeeks  = numDays / 7;
+    const showEarn  = State.summaryShowEarnings;
+    const fmt$      = v => '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+    const fmtH      = v => v.toFixed(1) + 'h';
+    const effRate   = totalHours > 0 ? totalEarned / totalHours : 0;
+
     // ── Charts ─────────────────────────────────────────────
     // Donut legend rows
     let legendHtml = '';
@@ -989,15 +1012,31 @@ const App = {
 
     let chartsHtml = `<div class="summary-charts">`;
 
-    // Totals banner
-    chartsHtml += `<div class="chart-card" style="display:flex;justify-content:space-between;align-items:center;padding:16px">
-      <div>
-        <div class="stat-label">Total Hours</div>
-        <div style="font-size:26px;font-weight:800;letter-spacing:-0.5px;margin-top:2px">${totalHours.toFixed(1)}<span style="font-size:14px;font-weight:500;color:var(--text2);margin-left:4px">hrs</span></div>
+    // Stats grid with hrs / $ toggle
+    chartsHtml += `<div class="chart-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div class="chart-title" style="margin-bottom:0">Overview</div>
+        <button class="toggle-earn-btn" onclick="App.toggleSummaryEarnings()">
+          ${showEarn ? 'hrs' : '$'}
+        </button>
       </div>
-      <div style="text-align:right">
-        <div class="stat-label">Total Billed</div>
-        <div style="font-size:26px;font-weight:800;letter-spacing:-0.5px;color:var(--success);margin-top:2px">$${totalEarned.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>
+      <div class="stats-grid-2">
+        <div class="mini-stat">
+          <div class="mini-stat-label">${showEarn ? 'Total Billed' : 'Total Hours'}</div>
+          <div class="mini-stat-value ${showEarn ? 'text-success' : ''}">${showEarn ? fmt$(totalEarned) : fmtH(totalHours)}</div>
+        </div>
+        <div class="mini-stat">
+          <div class="mini-stat-label">${showEarn ? 'Avg $/Day' : 'Avg Hrs/Day'}</div>
+          <div class="mini-stat-value">${showEarn ? fmt$(totalEarned / numDays) : fmtH(totalHours / numDays)}</div>
+        </div>
+        <div class="mini-stat">
+          <div class="mini-stat-label">${showEarn ? 'Avg $/Week' : 'Avg Hrs/Week'}</div>
+          <div class="mini-stat-value">${showEarn ? fmt$(totalEarned / numWeeks) : fmtH(totalHours / numWeeks)}</div>
+        </div>
+        <div class="mini-stat">
+          <div class="mini-stat-label">${showEarn ? 'Eff. Rate/hr' : 'Days Tracked'}</div>
+          <div class="mini-stat-value">${showEarn ? fmt$(effRate) : numDays + 'd'}</div>
+        </div>
       </div>
     </div>`;
 
