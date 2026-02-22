@@ -405,8 +405,8 @@ function buildDonutSVG(data, totalHours) {
   return `<svg viewBox="0 0 136 136">
     <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--bg3)" stroke-width="18"/>
     ${paths}
-    <text x="${cx}" y="${cy - 6}" text-anchor="middle" class="donut-center-label">${totalHours.toFixed(1)}</text>
-    <text x="${cx}" y="${cy + 10}" text-anchor="middle" class="donut-center-sub">hours</text>
+    <text x="${cx}" y="${cy - 4}" text-anchor="middle" class="donut-center-label">${totalHours.toFixed(1)}</text>
+    <text x="${cx}" y="${cy + 11}" text-anchor="middle" class="donut-center-sub">hours</text>
   </svg>`;
 }
 
@@ -440,11 +440,20 @@ function buildDailyBarSVG(startDate, endDate) {
     for (const day of days) {
       const ws = startOfWeek(day.date);
       const wk = dateKey(ws);
-      if (!weeks.has(wk)) weeks.set(wk, { date: ws, hours: 0, color: day.color });
-      weeks.get(wk).hours += day.hours;
+      if (!weeks.has(wk)) weeks.set(wk, { date: ws, hours: 0, colorHours: {} });
+      const entry = weeks.get(wk);
+      entry.hours += day.hours;
+      // Accumulate hours per color so dominant color wins (not just first day)
+      if (day.hours > 0 && day.color !== 'var(--accent)') {
+        entry.colorHours[day.color] = (entry.colorHours[day.color] || 0) + day.hours;
+      }
     }
     bars = [...weeks.values()];
-    bars.forEach((b, i) => { b.label = `W${i + 1}`; });
+    bars.forEach((b, i) => {
+      const top = Object.entries(b.colorHours).sort((a, z) => z[1] - a[1])[0];
+      b.color = top ? top[0] : 'var(--accent)';
+      b.label = `W${i + 1}`;
+    });
   } else {
     bars = days;
     const DAYS = ['Su','Mo','Tu','We','Th','Fr','Sa'];
@@ -457,17 +466,20 @@ function buildDailyBarSVG(startDate, endDate) {
 
   const maxH  = Math.max(...bars.map(b => b.hours), 1);
   const n     = bars.length;
-  const W     = n * 14;
+  // Scale bar slot width so the chart fills at least 260px without distorting
+  const SLOT  = Math.max(14, Math.floor(260 / n));
+  const BAR   = Math.round(SLOT * 0.72);
+  const W     = n * SLOT;
   const CHART = 52;
   const TOTAL = 68;
   let rects = '', labels = '';
   for (let i = 0; i < n; i++) {
     const b    = bars[i];
     const bH   = (b.hours / maxH) * CHART;
-    const x    = i * 14 + 2;
-    rects += `<rect x="${x}" y="${(CHART - bH).toFixed(1)}" width="10" height="${Math.max(bH, 1).toFixed(1)}" rx="2" fill="${b.color}" opacity="0.85"/>`;
+    const x    = i * SLOT + Math.round((SLOT - BAR) / 2);
+    rects += `<rect x="${x}" y="${(CHART - bH).toFixed(1)}" width="${BAR}" height="${Math.max(bH, 1).toFixed(1)}" rx="2" fill="${b.color}" opacity="0.85"/>`;
     if (n <= 14 || i % Math.ceil(n / 12) === 0 || i === n - 1) {
-      labels += `<text x="${x + 5}" y="${TOTAL - 2}" text-anchor="middle" class="bar-axis-lbl">${b.label}</text>`;
+      labels += `<text x="${x + BAR / 2}" y="${TOTAL - 2}" text-anchor="middle" class="bar-axis-lbl">${b.label}</text>`;
     }
   }
   // Y-axis reference lines
@@ -477,7 +489,7 @@ function buildDailyBarSVG(startDate, endDate) {
     <text x="0" y="9" class="bar-axis-top">${maxH.toFixed(0)}h</text>
     <text x="0" y="${CHART / 2 - 2}" class="bar-axis-top">${(maxH / 2).toFixed(0)}h</text>`;
 
-  return `<div class="daily-bar-wrap"><svg class="daily-bar-svg" viewBox="0 0 ${W} ${TOTAL}" preserveAspectRatio="none" style="width:${Math.max(W, 260)}px">
+  return `<div class="daily-bar-wrap"><svg class="daily-bar-svg" viewBox="0 0 ${W} ${TOTAL}" style="width:${W}px">
     ${gridLines}${rects}${labels}
   </svg></div>`;
 }
@@ -672,6 +684,25 @@ const App = {
     const todayFlag = isToday(day);
     document.getElementById('day-sub').textContent = todayFlag ? '' : formatShortDate(day);
     document.getElementById('today-btn').style.display = todayFlag ? 'none' : 'inline-block';
+
+    // Day total strip
+    const dayData = State.blocks[dk] || {};
+    const daySlots = Object.values(dayData).filter(b => b && b.clientId);
+    const dayHours = daySlots.length * 0.5;
+    const dayEarnings = daySlots.reduce((sum, b) => {
+      const c = getClient(b.clientId);
+      return sum + (c ? 0.5 * (c.rate || 0) : 0);
+    }, 0);
+    const strip = document.getElementById('day-total-strip');
+    if (strip) {
+      if (dayHours > 0) {
+        const earnStr = '$' + dayEarnings.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        strip.innerHTML = `<span class="dts-hours">${dayHours.toFixed(1)}h</span><span class="dts-sep">·</span><span class="dts-earn">${earnStr}</span>`;
+        strip.style.display = 'flex';
+      } else {
+        strip.style.display = 'none';
+      }
+    }
 
     // Fetch calendar events asynchronously (don't block render)
     const calPromise = ICal.fetchForDay(day);
@@ -1047,7 +1078,7 @@ const App = {
       legendHtml += `<div class="legend-row">
         <div class="legend-dot" style="background:${color}"></div>
         <div class="legend-name">${esc(name)}</div>
-        <div class="legend-val">${pct}%</div>
+        <div class="legend-val"><span class="legend-hours">${hours.toFixed(1)}h</span>${pct}%</div>
       </div>`;
     }
 

@@ -93,11 +93,18 @@
       align-items: center; justify-content: center;
       gap: 3px; height: var(--tab-h);
       background: none; border: none; cursor: pointer;
-      color: var(--text3); transition: color 0.15s;
+      color: var(--text3); transition: color 0.2s;
       -webkit-tap-highlight-color: transparent;
-      font-family: var(--font);
+      font-family: var(--font); position: relative;
+    }
+    .tab-btn::after {
+      content: ''; position: absolute; top: 0; left: 50%;
+      transform: translateX(-50%) scaleX(0);
+      width: 28px; height: 2px; border-radius: 0 0 3px 3px;
+      background: var(--accent); transition: transform 0.2s cubic-bezier(0.34,1.56,0.64,1);
     }
     .tab-btn.active { color: var(--accent2); }
+    .tab-btn.active::after { transform: translateX(-50%) scaleX(1); }
     .tab-btn svg { width: 22px; height: 22px; }
     .tab-label { font-size: 10px; font-weight: 500; letter-spacing: 0.3px; }
 
@@ -106,12 +113,24 @@
       background: var(--bg2); border: 1px solid var(--border);
       border-radius: var(--radius); padding: 16px;
       margin: 0 16px 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
     }
     .section-label {
-      font-size: 12px; font-weight: 600; letter-spacing: 0.8px;
+      font-size: 11px; font-weight: 700; letter-spacing: 1px;
       text-transform: uppercase; color: var(--text3);
       padding: 16px 20px 8px;
     }
+
+    /* ─── Day Total Strip ──────────────────────────── */
+    #day-total-strip {
+      display: none; align-items: center; justify-content: center;
+      gap: 10px; padding: 8px 16px; flex-shrink: 0;
+      background: rgba(108,99,255,0.07);
+      border-bottom: 1px solid rgba(108,99,255,0.15);
+    }
+    .dts-hours { font-size: 14px; font-weight: 800; color: var(--text); letter-spacing: -0.3px; }
+    .dts-sep { font-size: 13px; color: var(--text3); }
+    .dts-earn { font-size: 14px; font-weight: 600; color: var(--success); }
 
     /* ─── Buttons ──────────────────────────────────── */
     .btn {
@@ -217,7 +236,9 @@
     .time-block.empty:active { background: var(--bg3); transform: scale(0.98); }
     .time-block.filled {
       cursor: pointer;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
     }
+    .time-block.filled:active { transform: scale(0.985); opacity: 0.9; }
     .time-block.calendar-event {
       cursor: default; opacity: 0.85;
     }
@@ -259,9 +280,9 @@
       background: var(--bg2); border: 1px solid var(--border);
       border-radius: var(--radius); padding: 14px;
     }
-    .stat-label { font-size: 11px; color: var(--text2); font-weight: 500; text-transform: uppercase; letter-spacing: 0.6px; }
-    .stat-value { font-size: 24px; font-weight: 700; margin-top: 4px; letter-spacing: -0.5px; }
-    .stat-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
+    .stat-label { font-size: 10px; color: var(--text2); font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; }
+    .stat-value { font-size: 22px; font-weight: 800; margin-top: 4px; letter-spacing: -0.8px; }
+    .stat-sub { font-size: 11px; color: var(--text3); margin-top: 2px; }
 
     .bar-chart { padding: 8px 4px 0; }
     .bar-row {
@@ -327,10 +348,12 @@
     .chart-card {
       background: var(--bg2); border: 1px solid var(--border);
       border-radius: var(--radius); padding: 14px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+      background-image: linear-gradient(160deg, rgba(108,99,255,0.04) 0%, transparent 50%);
     }
     .chart-title {
-      font-size: 11px; font-weight: 600; letter-spacing: 0.7px;
-      text-transform: uppercase; color: var(--text3); margin-bottom: 12px;
+      font-size: 10px; font-weight: 700; letter-spacing: 1px;
+      text-transform: uppercase; color: var(--text3); margin-bottom: 14px;
     }
     .donut-wrap {
       display: flex; align-items: center; gap: 16px;
@@ -349,10 +372,11 @@
     }
     .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
     .legend-name { font-size: 13px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .legend-val { font-size: 13px; font-weight: 600; color: var(--text2); }
-    .daily-bar-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .legend-val { font-size: 12px; font-weight: 600; color: var(--text2); text-align: right; line-height: 1.4; flex-shrink: 0; }
+    .legend-hours { display: block; font-size: 12px; font-weight: 700; color: var(--text); }
+    .daily-bar-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 2px; }
     .daily-bar-wrap::-webkit-scrollbar { display: none; }
-    .daily-bar-svg { display: block; min-width: 100%; height: 80px; }
+    .daily-bar-svg { display: block; height: 68px; }
     .stats-grid-2 {
       display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
     }
@@ -360,8 +384,8 @@
       background: var(--bg3); border-radius: var(--radius-sm);
       padding: 10px 12px;
     }
-    .mini-stat-label { font-size: 11px; color: var(--text2); font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
-    .mini-stat-value { font-size: 18px; font-weight: 700; margin-top: 3px; letter-spacing: -0.3px; }
+    .mini-stat-label { font-size: 10px; color: var(--text2); font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; }
+    .mini-stat-value { font-size: 17px; font-weight: 800; margin-top: 4px; letter-spacing: -0.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .toggle-earn-btn {
       background: var(--bg3); border: 1px solid var(--border);
       border-radius: 20px; color: var(--accent2);
@@ -369,22 +393,23 @@
       padding: 5px 12px; cursor: pointer;
       -webkit-tap-highlight-color: transparent;
     }
-    .bar-axis-lbl { font-size: 8px; fill: var(--text3); }
-    .bar-axis-top { font-size: 8px; fill: var(--text2); }
+    .bar-axis-lbl { font-size: 7px; fill: var(--text3); }
+    .bar-axis-top { font-size: 7px; fill: var(--text2); }
 
     /* ─── Summary ──────────────────────────────────── */
     .summary-client {
       background: var(--bg2); border: 1px solid var(--border);
       border-radius: var(--radius); margin: 0 16px 12px; overflow: hidden;
       border-left-width: 3px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
     }
     .summary-client-header {
       display: flex; align-items: center; gap: 10px;
       padding: 14px 16px; border-bottom: 1px solid var(--border);
     }
     .client-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-    .summary-client-name { font-size: 16px; font-weight: 700; flex: 1; }
-    .summary-client-total { font-size: 18px; font-weight: 700; color: var(--success); }
+    .summary-client-name { font-size: 15px; font-weight: 700; flex: 1; }
+    .summary-client-total { font-size: 17px; font-weight: 800; color: var(--success); letter-spacing: -0.5px; }
     .summary-project-row {
       display: flex; align-items: center; justify-content: space-between;
       padding: 10px 16px; border-bottom: 1px solid var(--border);
@@ -576,6 +601,7 @@
       </div>
       <button class="day-nav-btn" onclick="App.dayNav(1)">›</button>
     </div>
+    <div id="day-total-strip"></div>
     <div id="timeline-container">
       <div class="timeline-inner" id="timeline"></div>
     </div>
@@ -738,6 +764,6 @@
 <div id="toast"></div>
 
 <script src="seed-data.js?v=3"></script>
-<script src="app.js?v=12"></script>
+<script src="app.js?v=13"></script>
 </body>
 </html>
