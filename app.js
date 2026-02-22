@@ -494,9 +494,19 @@ const App = {
 
   // ── Boot ────────────────────────────────────────────────
   async init() {
-    // Register service worker
+    // Register service worker — force update check on every launch
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
+      navigator.serviceWorker.register('sw.js').then(reg => {
+        reg.update(); // check for a newer SW immediately
+        reg.addEventListener('updatefound', () => {
+          const sw = reg.installing;
+          sw.addEventListener('statechange', () => {
+            if (sw.state === 'installed') self.skipWaiting && sw.postMessage({ type: 'SKIP_WAITING' });
+          });
+        });
+      }).catch(() => {});
+      // Reload the page when a new SW takes control
+      navigator.serviceWorker.addEventListener('controllerchange', () => location.reload());
     }
 
     // Load credentials from LS
