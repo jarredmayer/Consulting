@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Flow" />
+  <meta name="apple-mobile-web-app-title" content="Workflow" />
   <meta name="theme-color" content="#0a0a0f" />
-  <title>Flow</title>
+  <title>Workflow</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <style>
@@ -59,13 +59,17 @@
     .screen.active { display: flex; }
 
     .screen-header {
-      padding: 16px 20px 12px;
+      padding: 14px 20px 12px;
       display: flex; align-items: center; justify-content: space-between;
       flex-shrink: 0;
       border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(108,99,255,0.04) 0%, transparent 100%);
     }
     .screen-title {
-      font-size: 28px; font-weight: 700; letter-spacing: -0.5px;
+      font-size: 26px; font-weight: 800; letter-spacing: -0.5px;
+      background: linear-gradient(135deg, var(--text) 60%, var(--accent2));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
     }
     .screen-scroll {
       flex: 1; overflow-y: auto;
@@ -269,10 +273,94 @@
     .bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
     .bar-val { font-size: 12px; color: var(--text); width: 48px; text-align: right; flex-shrink: 0; }
 
+    /* ─── Range Picker ─────────────────────────────── */
+    .range-picker {
+      padding: 10px 16px 0; flex-shrink: 0;
+    }
+    .range-seg {
+      display: flex; background: var(--bg3); border-radius: var(--radius-sm);
+      border: 1px solid var(--border); padding: 3px; gap: 3px;
+    }
+    .seg-btn {
+      flex: 1; padding: 7px 4px; border: none; border-radius: 6px;
+      background: transparent; color: var(--text2);
+      font-family: var(--font); font-size: 13px; font-weight: 500;
+      cursor: pointer; transition: background 0.15s, color 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .seg-btn.active {
+      background: var(--accent); color: #fff; font-weight: 600;
+    }
+    .range-nav {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 0 6px;
+    }
+    .range-nav-label { font-size: 15px; font-weight: 600; text-align: center; }
+    .range-nav-btn {
+      width: 30px; height: 30px; border-radius: 50%;
+      background: var(--bg3); border: 1px solid var(--border);
+      color: var(--text); font-size: 16px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .range-nav-btn:active { opacity: 0.6; }
+    .custom-range-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 0 8px;
+    }
+    .custom-range-row span { color: var(--text3); font-size: 13px; }
+    .date-input {
+      flex: 1; padding: 8px 10px;
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); color: var(--text);
+      font-family: var(--font); font-size: 13px;
+      outline: none; -webkit-appearance: none;
+    }
+    .date-input:focus { border-color: var(--accent); }
+    ::-webkit-calendar-picker-indicator { filter: invert(0.8); }
+
+    /* ─── Summary Charts ────────────────────────────── */
+    .summary-charts {
+      display: flex; flex-direction: column; gap: 12px;
+      padding: 12px 16px 4px;
+    }
+    .chart-card {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 14px;
+    }
+    .chart-title {
+      font-size: 11px; font-weight: 600; letter-spacing: 0.7px;
+      text-transform: uppercase; color: var(--text3); margin-bottom: 12px;
+    }
+    .donut-wrap {
+      display: flex; align-items: center; gap: 16px;
+    }
+    .donut-svg-wrap { flex-shrink: 0; width: 120px; height: 120px; }
+    .donut-svg-wrap svg { width: 100%; height: 100%; }
+    .donut-center-label {
+      font-size: 18px; font-weight: 700; fill: var(--text);
+    }
+    .donut-center-sub {
+      font-size: 10px; fill: var(--text2);
+    }
+    .donut-legend { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+    .legend-row {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .legend-name { font-size: 13px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .legend-val { font-size: 13px; font-weight: 600; color: var(--text2); }
+    .daily-bar-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .daily-bar-wrap::-webkit-scrollbar { display: none; }
+    .daily-bar-svg { display: block; min-width: 100%; height: 80px; }
+    .bar-axis-lbl { font-size: 8px; fill: var(--text3); }
+    .bar-axis-top { font-size: 8px; fill: var(--text2); }
+
     /* ─── Summary ──────────────────────────────────── */
     .summary-client {
       background: var(--bg2); border: 1px solid var(--border);
       border-radius: var(--radius); margin: 0 16px 12px; overflow: hidden;
+      border-left-width: 3px;
     }
     .summary-client-header {
       display: flex; align-items: center; gap: 10px;
@@ -428,7 +516,7 @@
   <!-- Onboarding -->
   <div id="onboarding">
     <div class="onboard-logo">⏱</div>
-    <div class="onboard-title">Flow</div>
+    <div class="onboard-title">Workflow</div>
     <div class="onboard-sub">Your consultant time tracker.<br>Let's connect your data store.</div>
     <div class="onboard-form">
       <!-- Step 1: PAT -->
@@ -489,10 +577,23 @@
       <div class="screen-title">Summary</div>
       <button class="btn btn-sm btn-secondary" onclick="App.exportCSV()">Export CSV</button>
     </div>
-    <div class="month-nav">
-      <button class="month-nav-btn" onclick="App.summaryNav(-1)">‹</button>
-      <div class="month-label" id="summary-month-label"></div>
-      <button class="month-nav-btn" onclick="App.summaryNav(1)">›</button>
+    <div class="range-picker">
+      <div class="range-seg">
+        <button class="seg-btn" data-range="week" onclick="App.setSummaryRange('week')">Week</button>
+        <button class="seg-btn active" data-range="month" onclick="App.setSummaryRange('month')">Month</button>
+        <button class="seg-btn" data-range="quarter" onclick="App.setSummaryRange('quarter')">Quarter</button>
+        <button class="seg-btn" data-range="custom" onclick="App.setSummaryRange('custom')">Custom</button>
+      </div>
+      <div class="range-nav" id="summary-range-nav">
+        <button class="range-nav-btn" onclick="App.summaryNav(-1)">‹</button>
+        <div class="range-nav-label" id="summary-range-label"></div>
+        <button class="range-nav-btn" onclick="App.summaryNav(1)">›</button>
+      </div>
+      <div class="custom-range-row" id="summary-custom-row" style="display:none">
+        <input class="date-input" type="date" id="summary-custom-start" onchange="App.setCustomDate('start',this.value)" />
+        <span>to</span>
+        <input class="date-input" type="date" id="summary-custom-end" onchange="App.setCustomDate('end',this.value)" />
+      </div>
     </div>
     <div class="screen-scroll" id="summary-content"></div>
   </div>
@@ -620,6 +721,6 @@
 <div id="toast"></div>
 
 <script src="seed-data.js?v=3"></script>
-<script src="app.js?v=5"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>

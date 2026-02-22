@@ -1,6 +1,6 @@
 {
-  "name": "Flow — Time Tracker",
-  "short_name": "Flow",
+  "name": "Workflow — Time Tracker",
+  "short_name": "Workflow",
   "description": "Mobile-first consultant time tracker",
   "start_url": "/Consulting/",
   "scope": "/Consulting/",

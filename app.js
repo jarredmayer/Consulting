@@ -28,6 +28,10 @@ const State = {
   blocks:       {},   // { 'YYYY-MM-DD': { 'HH:MM': { clientId, projectId, notes } } }
   currentDay:   new Date(),
   summaryMonth: new Date(),
+  summaryRangeMode: 'month',    // 'week' | 'month' | 'quarter' | 'custom'
+  summaryRangeRef:  new Date(), // anchor date for week/month/quarter nav
+  summaryCustomStart: null,
+  summaryCustomEnd:   null,
   activeTab:    'today',
   calEvents:    [],   // parsed events for current day
   editingBlock: null, // { date, slot }
@@ -326,6 +330,147 @@ function aggregateRange(startDate, endDate) {
     d = addDays(d, 1);
   }
   return result;
+}
+
+// ── Summary range helper ────────────────────────────────────
+function getSummaryDateRange() {
+  const ref = State.summaryRangeRef;
+  switch (State.summaryRangeMode) {
+    case 'week': {
+      const start = startOfWeek(new Date(ref));
+      const end   = addDays(start, 6);
+      return { start, end };
+    }
+    case 'quarter': {
+      const q     = Math.floor(ref.getMonth() / 3);
+      const start = new Date(ref.getFullYear(), q * 3, 1);
+      const end   = new Date(ref.getFullYear(), q * 3 + 3, 0);
+      return { start, end };
+    }
+    case 'custom': {
+      const start = State.summaryCustomStart || startOfMonth(new Date());
+      const end   = State.summaryCustomEnd   || endOfMonth(new Date());
+      return { start, end };
+    }
+    default: { // month
+      return { start: startOfMonth(ref), end: endOfMonth(ref) };
+    }
+  }
+}
+
+function formatRangeLabel() {
+  const { start, end } = getSummaryDateRange();
+  switch (State.summaryRangeMode) {
+    case 'week':
+      return `${formatShortDate(start)} – ${formatShortDate(end)}`;
+    case 'quarter': {
+      const q = Math.floor(start.getMonth() / 3) + 1;
+      return `Q${q} ${start.getFullYear()}`;
+    }
+    case 'custom':
+      return `${formatShortDate(start)} – ${formatShortDate(end)}`;
+    default:
+      return formatMonthYear(State.summaryRangeRef);
+  }
+}
+
+// ── Chart builders ─────────────────────────────────────────
+function buildDonutSVG(data, totalHours) {
+  if (totalHours === 0) return '';
+  const r    = 54;
+  const cx   = 68, cy = 68;
+  const circ = 2 * Math.PI * r;
+  const GAP  = circ > 30 ? 1.5 : 0;
+  let offset = 0;
+  let paths  = '';
+  for (const [clientId, { hours }] of Object.entries(data)) {
+    const client = getClient(clientId);
+    const color  = client ? client.color : '#6c63ff';
+    const arc    = (hours / totalHours) * circ;
+    paths += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="18"
+      stroke-dasharray="${Math.max(arc - GAP, 0).toFixed(2)} ${(circ - arc + GAP).toFixed(2)}"
+      stroke-dashoffset="${(-offset).toFixed(2)}"
+      transform="rotate(-90 ${cx} ${cy})" />`;
+    offset += arc;
+  }
+  return `<svg viewBox="0 0 136 136">
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--bg3)" stroke-width="18"/>
+    ${paths}
+    <text x="${cx}" y="${cy - 6}" text-anchor="middle" class="donut-center-label">${totalHours.toFixed(1)}</text>
+    <text x="${cx}" y="${cy + 10}" text-anchor="middle" class="donut-center-sub">hours</text>
+  </svg>`;
+}
+
+function buildDailyBarSVG(startDate, endDate) {
+  // Collect per-day hours
+  const days = [];
+  let d = new Date(startDate);
+  d.setHours(0, 0, 0, 0);
+  const endD = new Date(endDate);
+  endD.setHours(23, 59, 59, 999);
+  while (d <= endD) {
+    const dk       = dateKey(d);
+    const dayData  = State.blocks[dk] || {};
+    const hours    = Object.keys(dayData).length * 0.5;
+    // pick dominant client color for bar
+    const counts   = {};
+    for (const b of Object.values(dayData)) {
+      if (b && b.clientId) counts[b.clientId] = (counts[b.clientId] || 0) + 1;
+    }
+    const topClient = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+    const client    = topClient ? getClient(topClient[0]) : null;
+    const color     = client ? client.color : 'var(--accent)';
+    days.push({ date: new Date(d), hours, color });
+    d = addDays(d, 1);
+  }
+
+  // Aggregate into bars (daily if ≤31 days, weekly otherwise)
+  let bars;
+  if (days.length > 31) {
+    const weeks = new Map();
+    for (const day of days) {
+      const ws = startOfWeek(day.date);
+      const wk = dateKey(ws);
+      if (!weeks.has(wk)) weeks.set(wk, { date: ws, hours: 0, color: day.color });
+      weeks.get(wk).hours += day.hours;
+    }
+    bars = [...weeks.values()];
+    bars.forEach((b, i) => { b.label = `W${i + 1}`; });
+  } else {
+    bars = days;
+    const DAYS = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+    bars.forEach(b => {
+      b.label = days.length <= 14
+        ? DAYS[b.date.getDay()]
+        : String(b.date.getDate());
+    });
+  }
+
+  const maxH  = Math.max(...bars.map(b => b.hours), 1);
+  const n     = bars.length;
+  const W     = n * 14;
+  const CHART = 52;
+  const TOTAL = 68;
+  let rects = '', labels = '';
+  for (let i = 0; i < n; i++) {
+    const b    = bars[i];
+    const bH   = (b.hours / maxH) * CHART;
+    const x    = i * 14 + 2;
+    rects += `<rect x="${x}" y="${(CHART - bH).toFixed(1)}" width="10" height="${Math.max(bH, 1).toFixed(1)}" rx="2" fill="${b.color}" opacity="0.85"/>`;
+    if (n <= 14 || i % Math.ceil(n / 12) === 0 || i === n - 1) {
+      labels += `<text x="${x + 5}" y="${TOTAL - 2}" text-anchor="middle" class="bar-axis-lbl">${b.label}</text>`;
+    }
+  }
+  // Y-axis reference lines
+  const gridLines = `
+    <line x1="0" y1="0" x2="${W}" y2="0" stroke="var(--border)" stroke-width="0.5"/>
+    <line x1="0" y1="${CHART / 2}" x2="${W}" y2="${CHART / 2}" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="3 3"/>
+    <text x="0" y="9" class="bar-axis-top">${maxH.toFixed(0)}h</text>
+    <text x="0" y="${CHART / 2 - 2}" class="bar-axis-top">${(maxH / 2).toFixed(0)}h</text>`;
+
+  return `<div class="daily-bar-wrap"><svg class="daily-bar-svg" viewBox="0 0 ${W} ${TOTAL}" preserveAspectRatio="none" style="width:${Math.max(W, 260)}px">
+    ${gridLines}${rects}${labels}
+  </svg></div>`;
 }
 
 // ── Rendering helpers ──────────────────────────────────────
@@ -748,32 +893,123 @@ const App = {
   },
 
   // ── Summary ──────────────────────────────────────────────
+  setSummaryRange(mode) {
+    State.summaryRangeMode = mode;
+    // Sync ref to current date when switching modes
+    if (mode !== 'custom') State.summaryRangeRef = new Date();
+
+    // Toggle UI
+    const navEl    = document.getElementById('summary-range-nav');
+    const customEl = document.getElementById('summary-custom-row');
+    navEl.style.display    = mode === 'custom' ? 'none' : '';
+    customEl.style.display = mode === 'custom' ? '' : 'none';
+
+    // Highlight active seg button
+    document.querySelectorAll('.seg-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.range === mode);
+    });
+
+    // Pre-fill custom inputs with current range
+    if (mode === 'custom') {
+      const today = dateKey(new Date());
+      const monthStart = dateKey(startOfMonth(new Date()));
+      document.getElementById('summary-custom-start').value = State.summaryCustomStart ? dateKey(State.summaryCustomStart) : monthStart;
+      document.getElementById('summary-custom-end').value   = State.summaryCustomEnd   ? dateKey(State.summaryCustomEnd)   : today;
+      if (!State.summaryCustomStart) State.summaryCustomStart = startOfMonth(new Date());
+      if (!State.summaryCustomEnd)   State.summaryCustomEnd   = new Date();
+    }
+
+    this.renderSummary();
+  },
+
+  setCustomDate(which, value) {
+    if (!value) return;
+    const d = new Date(value + 'T00:00:00');
+    if (which === 'start') State.summaryCustomStart = d;
+    else                   State.summaryCustomEnd   = d;
+    this.renderSummary();
+  },
+
   summaryNav(delta) {
-    const d = State.summaryMonth;
-    State.summaryMonth = new Date(d.getFullYear(), d.getMonth() + delta, 1);
+    const ref  = State.summaryRangeRef;
+    const mode = State.summaryRangeMode;
+    if (mode === 'week') {
+      State.summaryRangeRef = addDays(ref, delta * 7);
+    } else if (mode === 'quarter') {
+      State.summaryRangeRef = new Date(ref.getFullYear(), ref.getMonth() + delta * 3, 1);
+    } else {
+      State.summaryRangeRef = new Date(ref.getFullYear(), ref.getMonth() + delta, 1);
+    }
     this.renderSummary();
   },
 
   renderSummary() {
-    const month = State.summaryMonth;
-    document.getElementById('summary-month-label').textContent = formatMonthYear(month);
+    const { start, end } = getSummaryDateRange();
+    document.getElementById('summary-range-label').textContent = formatRangeLabel();
 
-    const start = startOfMonth(month);
-    const end   = endOfMonth(month);
-    const data  = aggregateRange(start, end);
+    const data        = aggregateRange(start, end);
+    const totalHours  = Object.values(data).reduce((s, v) => s + v.hours, 0);
+    const totalEarned = this.calcEarnings(data);
 
-    let html = '';
+    const content = document.getElementById('summary-content');
 
     if (Object.keys(data).length === 0) {
-      html = `<div class="empty-state">
+      content.innerHTML = `<div class="empty-state">
         <div class="empty-icon">📋</div>
-        <div class="empty-title">No data this month</div>
+        <div class="empty-title">No data for this period</div>
         <div class="empty-sub">Start tracking time on the Today tab</div>
       </div>`;
-      document.getElementById('summary-content').innerHTML = html;
       return;
     }
 
+    // ── Charts ─────────────────────────────────────────────
+    // Donut legend rows
+    let legendHtml = '';
+    for (const [clientId, { hours }] of Object.entries(data)) {
+      const client = getClient(clientId);
+      const color  = client ? client.color : '#6c63ff';
+      const name   = client ? client.name  : 'Unknown';
+      const pct    = totalHours > 0 ? Math.round((hours / totalHours) * 100) : 0;
+      legendHtml += `<div class="legend-row">
+        <div class="legend-dot" style="background:${color}"></div>
+        <div class="legend-name">${esc(name)}</div>
+        <div class="legend-val">${pct}%</div>
+      </div>`;
+    }
+
+    let chartsHtml = `<div class="summary-charts">`;
+
+    // Totals banner
+    chartsHtml += `<div class="chart-card" style="display:flex;justify-content:space-between;align-items:center;padding:16px">
+      <div>
+        <div class="stat-label">Total Hours</div>
+        <div style="font-size:26px;font-weight:800;letter-spacing:-0.5px;margin-top:2px">${totalHours.toFixed(1)}<span style="font-size:14px;font-weight:500;color:var(--text2);margin-left:4px">hrs</span></div>
+      </div>
+      <div style="text-align:right">
+        <div class="stat-label">Total Billed</div>
+        <div style="font-size:26px;font-weight:800;letter-spacing:-0.5px;color:var(--success);margin-top:2px">$${totalEarned.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>
+      </div>
+    </div>`;
+
+    // Donut chart
+    chartsHtml += `<div class="chart-card">
+      <div class="chart-title">Client Breakdown</div>
+      <div class="donut-wrap">
+        <div class="donut-svg-wrap">${buildDonutSVG(data, totalHours)}</div>
+        <div class="donut-legend">${legendHtml}</div>
+      </div>
+    </div>`;
+
+    // Daily/weekly bar chart
+    chartsHtml += `<div class="chart-card">
+      <div class="chart-title">Hours Over Time</div>
+      ${buildDailyBarSVG(start, end)}
+    </div>`;
+
+    chartsHtml += `</div>`;
+
+    // ── Per-client breakdown cards ──────────────────────────
+    let cardsHtml = `<div style="padding-top:4px">`;
     for (const [clientId, { hours, byProject }] of Object.entries(data)) {
       const client   = getClient(clientId);
       const color    = client ? client.color : '#6c63ff';
@@ -781,63 +1017,44 @@ const App = {
       const rate     = client ? (client.rate || 0) : 0;
       const earnings = hours * rate;
 
-      html += `<div class="summary-client">
+      cardsHtml += `<div class="summary-client" style="border-left-color:${color}">
         <div class="summary-client-header">
           <div class="client-dot" style="background:${color}"></div>
           <div class="summary-client-name">${esc(name)}</div>
           <div class="summary-client-total">$${earnings.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>
+        </div>
+        <div class="summary-project-row">
+          <div class="summary-proj-name text-muted fs-sm">Rate</div>
+          <div></div>
+          <div class="summary-proj-amount fs-sm">$${rate}/hr</div>
+        </div>
+        <div class="summary-project-row">
+          <div class="summary-proj-name text-muted fs-sm">Hours</div>
+          <div class="summary-proj-hours">${hours.toFixed(1)} hrs</div>
+          <div></div>
         </div>`;
 
-      // Rate row
-      html += `<div class="summary-project-row">
-        <div class="summary-proj-name text-muted fs-sm">Rate</div>
-        <div></div>
-        <div class="summary-proj-amount fs-sm">$${rate}/hr</div>
-      </div>`;
-      html += `<div class="summary-project-row">
-        <div class="summary-proj-name text-muted fs-sm">Total hours</div>
-        <div class="summary-proj-hours">${hours.toFixed(1)} hrs</div>
-        <div></div>
-      </div>`;
-
       for (const [projectId, pHours] of Object.entries(byProject)) {
-        const proj = getProject(projectId);
+        const proj      = getProject(projectId);
         const pEarnings = pHours * rate;
-        html += `<div class="summary-project-row">
+        const pPct      = hours > 0 ? Math.round((pHours / hours) * 100) : 0;
+        cardsHtml += `<div class="summary-project-row">
           <div class="summary-proj-name">${proj ? esc(proj.name) : 'Unassigned'}</div>
-          <div class="summary-proj-hours">${pHours.toFixed(1)} hrs</div>
+          <div class="summary-proj-hours">${pHours.toFixed(1)} hrs <span style="color:var(--text3)">(${pPct}%)</span></div>
           <div class="summary-proj-amount">$${pEarnings.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}</div>
         </div>`;
       }
 
-      html += `</div>`;
+      cardsHtml += `</div>`;
     }
+    cardsHtml += `<div style="height:20px"></div></div>`;
 
-    // Totals row
-    const totalHours    = Object.values(data).reduce((s, v) => s + v.hours, 0);
-    const totalEarnings = this.calcEarnings(data);
-    html += `<div class="card" style="margin-top:4px;display:flex;justify-content:space-between;align-items:center">
-      <div>
-        <div class="stat-label">Total</div>
-        <div style="font-size:20px;font-weight:700;margin-top:2px">${totalHours.toFixed(1)} hrs</div>
-      </div>
-      <div style="text-align:right">
-        <div class="stat-label">Billed</div>
-        <div style="font-size:20px;font-weight:700;color:var(--success);margin-top:2px">
-          $${totalEarnings.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}
-        </div>
-      </div>
-    </div>`;
-    html += `<div style="height:20px"></div>`;
-
-    document.getElementById('summary-content').innerHTML = html;
+    content.innerHTML = chartsHtml + cardsHtml;
   },
 
   // ── CSV Export ───────────────────────────────────────────
   exportCSV() {
-    const month = State.summaryMonth;
-    const start = startOfMonth(month);
-    const end   = endOfMonth(month);
+    const { start, end } = getSummaryDateRange();
     const data  = aggregateRange(start, end);
 
     const rows = [['Client', 'Project', 'Hours', 'Rate ($/hr)', 'Amount ($)']];
@@ -857,7 +1074,7 @@ const App = {
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href     = url;
-    a.download = `flow-${formatMonthYear(month).replace(' ', '-')}.csv`;
+    a.download = `workflow-${formatRangeLabel().replace(/[\s–]/g, '-')}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     showToast('CSV exported');
