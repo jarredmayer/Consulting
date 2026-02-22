@@ -534,10 +534,32 @@ const App = {
     this.initialized = true;
   },
 
+  // Fix any hig_hist entries on or after 2025-12-01 that should be hig_curr
+  migrateClientTags() {
+    const CUTOFF = '2025-12-01';
+    let fixed = 0;
+    for (const [day, slots] of Object.entries(State.blocks)) {
+      if (day < CUTOFF) continue;
+      for (const block of Object.values(slots)) {
+        if (block && block.clientId === 'hig_hist') {
+          block.clientId = 'hig_curr';
+          fixed++;
+        }
+      }
+    }
+    return fixed;
+  },
+
   async loadData() {
     setSyncing(true);
     try {
       await Gist.load();
+      // Fix any mistagged entries (hig_hist after Dec 1 2025 → hig_curr)
+      const fixed = this.migrateClientTags();
+      if (fixed > 0) {
+        await Gist.save();
+        showToast(`Fixed ${fixed} mistagged entries ✓`);
+      }
       // Auto-seed historical data whenever blocks is empty
       if (Object.keys(State.blocks).length === 0 && typeof SEED_DATA !== 'undefined') {
         State.clients  = SEED_DATA.clients;
