@@ -988,8 +988,22 @@ const App = {
     }
 
     // ── Computed stats ─────────────────────────────────────
-    const numDays   = Math.max(1, Math.round((end - start) / 86400000) + 1);
-    const numWeeks  = numDays / 7;
+    // Clamp end to today so averages reflect elapsed time, not future days
+    const today       = new Date(); today.setHours(23, 59, 59, 999);
+    const clampedEnd  = end < today ? end : today;
+
+    // Count elapsed weekdays (Mon–Fri) from start through clampedEnd
+    let elapsedWeekdays = 0;
+    const d = new Date(start); d.setHours(0, 0, 0, 0);
+    const ce = new Date(clampedEnd); ce.setHours(23, 59, 59, 999);
+    while (d <= ce) {
+      const dow = d.getDay();
+      if (dow !== 0 && dow !== 6) elapsedWeekdays++;
+      d.setDate(d.getDate() + 1);
+    }
+    elapsedWeekdays = Math.max(1, elapsedWeekdays);
+    const elapsedWeeks = Math.max(1, elapsedWeekdays / 5);
+
     const showEarn  = State.summaryShowEarnings;
     const fmt$      = v => '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
     const fmtH      = v => v.toFixed(1) + 'h';
@@ -1027,15 +1041,15 @@ const App = {
         </div>
         <div class="mini-stat">
           <div class="mini-stat-label">${showEarn ? 'Avg $/Day' : 'Avg Hrs/Day'}</div>
-          <div class="mini-stat-value">${showEarn ? fmt$(totalEarned / numDays) : fmtH(totalHours / numDays)}</div>
+          <div class="mini-stat-value">${showEarn ? fmt$(totalEarned / elapsedWeekdays) : fmtH(totalHours / elapsedWeekdays)}</div>
         </div>
         <div class="mini-stat">
           <div class="mini-stat-label">${showEarn ? 'Avg $/Week' : 'Avg Hrs/Week'}</div>
-          <div class="mini-stat-value">${showEarn ? fmt$(totalEarned / numWeeks) : fmtH(totalHours / numWeeks)}</div>
+          <div class="mini-stat-value">${showEarn ? fmt$(totalEarned / elapsedWeeks) : fmtH(totalHours / elapsedWeeks)}</div>
         </div>
         <div class="mini-stat">
           <div class="mini-stat-label">${showEarn ? 'Eff. Rate/hr' : 'Days Tracked'}</div>
-          <div class="mini-stat-value">${showEarn ? fmt$(effRate) : numDays + 'd'}</div>
+          <div class="mini-stat-value">${showEarn ? fmt$(effRate) : elapsedWeekdays + 'wd'}</div>
         </div>
       </div>
     </div>`;
