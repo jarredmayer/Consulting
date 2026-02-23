@@ -729,41 +729,67 @@ const App = {
   },
 
   buildTimelineHTML(dk, calSlots) {
-    let html = '';
+    // Build ordered slot list and compute merge roles
+    const allSlots = [];
     for (let h = DAY_START; h < DAY_END; h++) {
-      for (let m = 0; m < 60; m += SLOT_MINS) {
-        const slot    = slotKey(h, m);
-        const block   = getBlock(dk, slot);
-        const calEvts = calSlots[slot] || [];
-        const showTime = m === 0;
-        const timeLabel = showTime
-          ? `${h > 12 ? h - 12 : h}${h >= 12 ? 'pm' : 'am'}`
-          : '';
-
-        html += `<div class="time-row">
-          <div class="time-label">${timeLabel}</div>
-          ${this.blockHTML(dk, slot, block, calEvts)}
-        </div>`;
+      for (let m = 0; m < 60; m += SLOT_MINS) allSlots.push(slotKey(h, m));
+    }
+    const role = {};
+    let i = 0;
+    while (i < allSlots.length) {
+      const s = allSlots[i];
+      const b = getBlock(dk, s);
+      if (!b || !b.clientId) { role[s] = 'single'; i++; continue; }
+      let j = i + 1;
+      while (j < allSlots.length) {
+        const nb = getBlock(dk, allSlots[j]);
+        if (!nb || nb.clientId !== b.clientId || (nb.projectId || '') !== (b.projectId || '')) break;
+        j++;
       }
+      const len = j - i;
+      if (len === 1) {
+        role[allSlots[i]] = 'single';
+      } else {
+        role[allSlots[i]] = 'start';
+        for (let k = i + 1; k < j - 1; k++) role[allSlots[k]] = 'mid';
+        role[allSlots[j - 1]] = 'end';
+      }
+      i = j;
+    }
+
+    let html = '';
+    for (const slot of allSlots) {
+      const block   = getBlock(dk, slot);
+      const calEvts = calSlots[slot] || [];
+      const { h, m } = parseSlot(slot);
+      const r       = role[slot] || 'single';
+      const timeLabel = m === 0 ? `${h > 12 ? h - 12 : h}${h >= 12 ? 'pm' : 'am'}` : '';
+      const isCont  = r === 'mid' || r === 'end';
+      html += `<div class="time-row${isCont ? ' merge-cont' : ''}">
+        <div class="time-label">${timeLabel}</div>
+        ${this.blockHTML(dk, slot, block, calEvts, r)}
+      </div>`;
     }
     return html;
   },
 
-  blockHTML(dk, slot, block, calEvts) {
+  blockHTML(dk, slot, block, calEvts, role = 'single') {
     if (block && block.clientId) {
       const client  = getClient(block.clientId);
       const project = getProject(block.projectId);
       const color   = client ? client.color : '#6c63ff';
       const bg      = hexToRgba(color, 0.18);
-      const border  = hexToRgba(color, 0.45);
+      const radii   = { single: '8px', start: '8px 8px 0 0', mid: '0', end: '0 0 8px 8px' };
+      const br      = radii[role] || '8px';
+      const showContent = role === 'single' || role === 'start';
       return `<div class="time-block filled"
-        style="background:${bg};border-left:3px solid ${color};color:${color}"
+        style="background:${bg};border-left:3px solid ${color};color:${color};border-radius:${br}"
         onclick="App.openBlockModal('${dk}','${slot}')">
-        <div class="time-block-content">
+        ${showContent ? `<div class="time-block-content">
           <div class="block-client">${client ? esc(client.name) : '?'}</div>
           <div class="block-project" style="color:var(--text)">${project ? esc(project.name) : ''}</div>
           ${block.notes ? `<div class="block-notes" style="color:var(--text2)">${esc(block.notes)}</div>` : ''}
-        </div>
+        </div>` : ''}
       </div>`;
     }
     if (calEvts.length > 0) {
@@ -782,6 +808,7 @@ const App = {
   // ── Block modal ──────────────────────────────────────────
   openBlockModal(dk, slot) {
     State.editingBlock = { date: dk, slot };
+    State.editingDuration = 1;
     const block = getBlock(dk, slot);
     const { h, m } = parseSlot(slot);
     const hour = h > 12 ? h - 12 : h;
@@ -796,19 +823,48 @@ const App = {
     clientSel.innerHTML = '<option value="">Select client…</option>' +
       State.clients.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
 
+    const durField = document.getElementById('bm-duration-field');
+    const maxSlots = Math.floor(((DAY_END * 60) - (h * 60 + m)) / 30);
+    State.editingMaxDuration = maxSlots;
+
     if (block) {
       clientSel.value = block.clientId || '';
       this.updateBlockProjectDropdown(block.clientId, block.projectId);
       document.getElementById('bm-notes').value = block.notes || '';
       document.getElementById('bm-clear-btn').style.display = 'inline-flex';
+      if (durField) durField.style.display = 'none';
     } else {
-      document.getElementById('bm-project').innerHTML = '<option value="">Select project…</option>';
       document.getElementById('bm-notes').value = '';
       document.getElementById('bm-clear-btn').style.display = 'none';
+      if (durField) { durField.style.display = ''; document.getElementById('bm-dur-display').textContent = '30 min'; }
+      // Pre-fill client/project from the slot immediately above
+      const prev = this.getPrevBlock(dk, slot);
+      if (prev) {
+        clientSel.value = prev.clientId;
+        this.updateBlockProjectDropdown(prev.clientId, prev.projectId);
+      } else {
+        this.updateBlockProjectDropdown(null, null);
+      }
     }
 
     document.getElementById('block-modal').classList.add('open');
     setTimeout(() => document.getElementById('bm-notes').focus?.(), 400);
+  },
+
+  getPrevBlock(dk, slot) {
+    const { h, m } = parseSlot(slot);
+    const prevMin = h * 60 + m - 30;
+    if (prevMin < DAY_START * 60) return null;
+    return getBlock(dk, slotKey(Math.floor(prevMin / 60), prevMin % 60)) || null;
+  },
+
+  adjustDuration(delta) {
+    State.editingDuration = Math.max(1, Math.min(State.editingMaxDuration || 60, (State.editingDuration || 1) + delta));
+    const mins = State.editingDuration * 30;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    document.getElementById('bm-dur-display').textContent =
+      h === 0 ? `${mins} min` : m === 0 ? `${h}h` : `${h}h ${m}m`;
   },
 
   blockModalClientChange() {
@@ -835,7 +891,17 @@ const App = {
     const projectId = document.getElementById('bm-project').value;
     const notes     = document.getElementById('bm-notes').value.trim();
     if (!clientId) { showToast('Please select a client'); return; }
-    setBlock(date, slot, { clientId, projectId, notes });
+    const n = State.editingDuration || 1;
+    const { h, m } = parseSlot(slot);
+    let totalMin = h * 60 + m;
+    for (let i = 0; i < n; i++) {
+      const sh = Math.floor(totalMin / 60);
+      const sm = totalMin % 60;
+      if (sh >= DAY_END) break;
+      setBlock(date, slotKey(sh, sm), { clientId, projectId, notes });
+      totalMin += 30;
+    }
+    State.editingDuration = 1;
     this.closeBlockModal();
     this.renderToday();
     await Gist.syncWithRetry();

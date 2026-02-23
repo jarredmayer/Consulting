@@ -217,6 +217,7 @@
       border-top: 1px solid var(--border);
     }
     .time-row:first-child { border-top: none; }
+    .time-row.merge-cont { border-top: none; }
     .time-label {
       font-size: 11px; color: var(--text3); font-weight: 500;
       padding-top: 4px; text-align: right;
@@ -542,6 +543,25 @@
     .mt-8 { margin-top: 8px; }
     .mb-0 { margin-bottom: 0; }
 
+    /* ─── Duration stepper ─────────────────────────── */
+    .duration-stepper {
+      display: flex; align-items: center;
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); overflow: hidden;
+    }
+    .dur-btn {
+      width: 48px; height: 44px; background: none; border: none;
+      color: var(--text); font-size: 22px; font-weight: 300; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; -webkit-tap-highlight-color: transparent;
+      transition: background 0.1s;
+    }
+    .dur-btn:active { background: var(--border); }
+    .dur-display {
+      flex: 1; text-align: center; font-size: 16px; font-weight: 700;
+      color: var(--text); letter-spacing: -0.3px; pointer-events: none;
+    }
+
     /* ─── Color input ──────────────────────────────── */
     input[type="color"] {
       -webkit-appearance: none; width: 40px; height: 40px;
@@ -698,6 +718,14 @@
           <option value="">Select project…</option>
         </select>
       </div>
+      <div class="field" id="bm-duration-field">
+        <label class="field-label">Duration</label>
+        <div class="duration-stepper">
+          <button class="dur-btn" onclick="App.adjustDuration(-1)">−</button>
+          <div class="dur-display" id="bm-dur-display">30 min</div>
+          <button class="dur-btn" onclick="App.adjustDuration(1)">+</button>
+        </div>
+      </div>
       <div class="field">
         <label class="field-label">Notes (optional)</label>
         <input class="input" type="text" id="bm-notes" placeholder="What did you work on?" />
@@ -764,6 +792,6 @@
 <div id="toast"></div>
 
 <script src="seed-data.js?v=3"></script>
-<script src="app.js?v=13"></script>
+<script src="app.js?v=14"></script>
 </body>
 </html>
