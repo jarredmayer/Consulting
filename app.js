@@ -806,38 +806,103 @@ const App = {
   },
 
   // ── Block modal ──────────────────────────────────────────
+
+  // Returns all slots in the merged run that contains `slot` (same client+project)
+  getMergedRun(dk, slot) {
+    const block = getBlock(dk, slot);
+    if (!block || !block.clientId) return [slot];
+    const allSlots = [];
+    for (let h = DAY_START; h < DAY_END; h++) {
+      for (let m = 0; m < 60; m += SLOT_MINS) allSlots.push(slotKey(h, m));
+    }
+    const idx = allSlots.indexOf(slot);
+    if (idx === -1) return [slot];
+    let start = idx;
+    while (start > 0) {
+      const b = getBlock(dk, allSlots[start - 1]);
+      if (!b || b.clientId !== block.clientId || (b.projectId || '') !== (block.projectId || '')) break;
+      start--;
+    }
+    let end = idx;
+    while (end < allSlots.length - 1) {
+      const b = getBlock(dk, allSlots[end + 1]);
+      if (!b || b.clientId !== block.clientId || (b.projectId || '') !== (block.projectId || '')) break;
+      end++;
+    }
+    return allSlots.slice(start, end + 1);
+  },
+
   openBlockModal(dk, slot) {
-    State.editingBlock = { date: dk, slot };
+    State.editingBlock    = { date: dk, slot };
     State.editingDuration = 1;
+    State.editingRunSlots = null;
     const block = getBlock(dk, slot);
     const { h, m } = parseSlot(slot);
-    const hour = h > 12 ? h - 12 : h;
-    const ampm = h >= 12 ? 'pm' : 'am';
-    const minStr = m === 0 ? '' : `:${String(m).padStart(2,'0')}`;
-    document.getElementById('block-modal-title').textContent =
-      `${hour}${minStr}${ampm} — ${String(m + SLOT_MINS === 60 ? h + 1 : h > 12 ? h - 12 : h)
-        .replace(/^(\d)/, '$1')}:${String((m + SLOT_MINS) % 60).padStart(2,'0')}${h + (m + SLOT_MINS >= 60 ? 1 : 0) >= 12 ? 'pm' : 'am'}`;
 
     // Populate client dropdown
     const clientSel = document.getElementById('bm-client');
     clientSel.innerHTML = '<option value="">Select client…</option>' +
       State.clients.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
 
-    const durField = document.getElementById('bm-duration-field');
-    const maxSlots = Math.floor(((DAY_END * 60) - (h * 60 + m)) / 30);
-    State.editingMaxDuration = maxSlots;
+    const durField  = document.getElementById('bm-duration-field');
+    const runInfo   = document.getElementById('bm-run-info');
+    const clearBtn  = document.getElementById('bm-clear-btn');
+    const saveBtn   = document.querySelector('#block-modal .btn-primary');
 
     if (block) {
+      // ── Editing existing block ──────────────────────
+      const run = this.getMergedRun(dk, slot);
+      State.editingRunSlots = run;
+
+      // Title: show full run range
+      const fSlot = run[0];
+      const lSlot = run[run.length - 1];
+      const { h: fh, m: fm } = parseSlot(fSlot);
+      const { h: lh, m: lm } = parseSlot(lSlot);
+      const endMin = lh * 60 + lm + 30;
+      const fmtT = (th, tm) => {
+        const hr = th > 12 ? th - 12 : th === 0 ? 12 : th;
+        const ap = th >= 12 ? 'pm' : 'am';
+        return tm === 0 ? `${hr}${ap}` : `${hr}:${String(tm).padStart(2,'0')}${ap}`;
+      };
+      document.getElementById('block-modal-title').textContent =
+        `${fmtT(fh, fm)} — ${fmtT(Math.floor(endMin / 60), endMin % 60)}`;
+
       clientSel.value = block.clientId || '';
       this.updateBlockProjectDropdown(block.clientId, block.projectId);
       document.getElementById('bm-notes').value = block.notes || '';
-      document.getElementById('bm-clear-btn').style.display = 'inline-flex';
+
       if (durField) durField.style.display = 'none';
+      if (runInfo) {
+        if (run.length > 1) {
+          runInfo.textContent = `Edits all ${run.length} slots · ${(run.length * 0.5).toFixed(1)}h`;
+          runInfo.style.display = '';
+        } else {
+          runInfo.style.display = 'none';
+        }
+      }
+      if (clearBtn) { clearBtn.style.display = 'inline-flex'; clearBtn.textContent = 'Clear slot'; }
+      if (saveBtn)  saveBtn.textContent = run.length > 1 ? 'Save block' : 'Save';
+
     } else {
+      // ── New empty slot ──────────────────────────────
+      const hour   = h > 12 ? h - 12 : h;
+      const ampm   = h >= 12 ? 'pm' : 'am';
+      const minStr = m === 0 ? '' : `:${String(m).padStart(2,'0')}`;
+      document.getElementById('block-modal-title').textContent =
+        `${hour}${minStr}${ampm} — ${String(m + SLOT_MINS === 60 ? h + 1 : h > 12 ? h - 12 : h)
+          .replace(/^(\d)/, '$1')}:${String((m + SLOT_MINS) % 60).padStart(2,'0')}${h + (m + SLOT_MINS >= 60 ? 1 : 0) >= 12 ? 'pm' : 'am'}`;
+
+      const maxSlots = Math.floor(((DAY_END * 60) - (h * 60 + m)) / 30);
+      State.editingMaxDuration = maxSlots;
       document.getElementById('bm-notes').value = '';
-      document.getElementById('bm-clear-btn').style.display = 'none';
+
       if (durField) { durField.style.display = ''; document.getElementById('bm-dur-display').textContent = '30 min'; }
-      // Pre-fill client/project from the slot immediately above
+      if (runInfo)  runInfo.style.display = 'none';
+      if (clearBtn) clearBtn.style.display = 'none';
+      if (saveBtn)  saveBtn.textContent = 'Save';
+
+      // Pre-fill from slot immediately above
       const prev = this.getPrevBlock(dk, slot);
       if (prev) {
         clientSel.value = prev.clientId;
@@ -891,15 +956,25 @@ const App = {
     const projectId = document.getElementById('bm-project').value;
     const notes     = document.getElementById('bm-notes').value.trim();
     if (!clientId) { showToast('Please select a client'); return; }
-    const n = State.editingDuration || 1;
-    const { h, m } = parseSlot(slot);
-    let totalMin = h * 60 + m;
-    for (let i = 0; i < n; i++) {
-      const sh = Math.floor(totalMin / 60);
-      const sm = totalMin % 60;
-      if (sh >= DAY_END) break;
-      setBlock(date, slotKey(sh, sm), { clientId, projectId, notes });
-      totalMin += 30;
+
+    if (State.editingRunSlots) {
+      // Editing existing block: apply to entire merged run
+      for (const s of State.editingRunSlots) {
+        setBlock(date, s, { clientId, projectId, notes });
+      }
+      State.editingRunSlots = null;
+    } else {
+      // New block: fill n slots forward from tapped slot
+      const n = State.editingDuration || 1;
+      const { h, m } = parseSlot(slot);
+      let totalMin = h * 60 + m;
+      for (let i = 0; i < n; i++) {
+        const sh = Math.floor(totalMin / 60);
+        const sm = totalMin % 60;
+        if (sh >= DAY_END) break;
+        setBlock(date, slotKey(sh, sm), { clientId, projectId, notes });
+        totalMin += 30;
+      }
     }
     State.editingDuration = 1;
     this.closeBlockModal();

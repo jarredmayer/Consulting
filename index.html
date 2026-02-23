@@ -543,6 +543,12 @@
     .mt-8 { margin-top: 8px; }
     .mb-0 { margin-bottom: 0; }
 
+    /* ─── Block run info ───────────────────────────── */
+    .bm-run-info {
+      font-size: 12px; font-weight: 600; color: var(--accent2);
+      text-align: center; padding: 0 0 12px; margin-top: -4px;
+    }
+
     /* ─── Duration stepper ─────────────────────────── */
     .duration-stepper {
       display: flex; align-items: center;
@@ -718,6 +724,7 @@
           <option value="">Select project…</option>
         </select>
       </div>
+      <div id="bm-run-info" class="bm-run-info" style="display:none"></div>
       <div class="field" id="bm-duration-field">
         <label class="field-label">Duration</label>
         <div class="duration-stepper">
@@ -792,6 +799,6 @@
 <div id="toast"></div>
 
 <script src="seed-data.js?v=3"></script>
-<script src="app.js?v=14"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>
