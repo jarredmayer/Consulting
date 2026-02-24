@@ -40,8 +40,9 @@ const State = {
   editingProjectId: null,
   syncing:      false,
   initialized:  false,
-  invoices:     {},   // { 'YYYY-MM': { sentDate, paidDate, legacy? } }
-  editingInvoiceYM: null,
+  invoices:     {},   // { 'YYYY-MM': { clientId: { sentDate, paidDate } } }
+  editingInvoiceYM:       null,
+  editingInvoiceClientId: null,
   weeklyHoursTarget: 50,  // user-adjustable weekly hours upper bound
 };
 
@@ -155,14 +156,41 @@ const Gist = {
     State.projects = parsed.projects || [];
     State.blocks   = parsed.blocks   || {};
     State.icalUrl  = parsed.icalUrl  || State.icalUrl;
-    // Migrate invoices: old format was { 'YYYY-MM': true }, new is { sentDate, paidDate }
+    // Migrate invoices to per-client-per-month format:
+    // v1: { 'YYYY-MM': true }
+    // v2: { 'YYYY-MM': { sentDate, paidDate } }
+    // v3 (current): { 'YYYY-MM': { clientId: { sentDate, paidDate } } }
     const rawInvoices = parsed.invoices || {};
     State.invoices = {};
     for (const [ym, val] of Object.entries(rawInvoices)) {
-      if (val === true) {
-        State.invoices[ym] = { sentDate: null, paidDate: null, legacy: true };
-      } else if (val && typeof val === 'object') {
-        State.invoices[ym] = { sentDate: val.sentDate || null, paidDate: val.paidDate || null, ...(val.legacy ? { legacy: true } : {}) };
+      if (!val) continue;
+      // Detect old per-month formats (v1/v2): val is true, or has sentDate/paidDate/legacy at top level
+      const isOldFormat = val === true || val.sentDate !== undefined || val.paidDate !== undefined || val.legacy === true;
+      if (isOldFormat) {
+        // Find which client(s) had hours in this month from already-loaded blocks
+        const [y, m] = ym.split('-').map(Number);
+        const clientHours = {};
+        let d2 = new Date(y, m - 1, 1);
+        const mEnd = new Date(y, m, 0);
+        while (d2 <= mEnd) {
+          const dk2 = dateKey(d2);
+          for (const block of Object.values(State.blocks[dk2] || {})) {
+            if (block && block.clientId) clientHours[block.clientId] = (clientHours[block.clientId] || 0) + 0.5;
+          }
+          d2 = addDays(d2, 1);
+        }
+        const clientIds = Object.keys(clientHours);
+        if (clientIds.length === 1) {
+          // Unambiguous single client — migrate cleanly
+          const invData = val === true
+            ? { sentDate: null, paidDate: null }
+            : { sentDate: val.sentDate || null, paidDate: val.paidDate || null };
+          State.invoices[ym] = { [clientIds[0]]: invData };
+        }
+        // If multiple or no clients, drop the legacy record (can't assign unambiguously)
+      } else {
+        // Already v3 per-client format
+        State.invoices[ym] = val;
       }
     }
     State.weeklyHoursTarget = parsed.weeklyHoursTarget || 50;
@@ -1270,54 +1298,72 @@ const App = {
 
   // ── Billing ───────────────────────────────────────────────
   renderBilling() {
-    const today  = new Date();
-    const fmt$   = v => '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const today = new Date();
+    const fmt$  = v => '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-    // Collect months with data
+    // Collect months with any tracked data
     const monthsSet = new Set();
     for (const dk of Object.keys(State.blocks)) {
       if (Object.keys(State.blocks[dk]).length > 0) monthsSet.add(dk.slice(0, 7));
     }
-    // Also include any month that has invoice data, even if no blocks
     for (const ym of Object.keys(State.invoices)) monthsSet.add(ym);
     monthsSet.add(dateKey(today).slice(0, 7));
-
     const billingYMs = [...monthsSet].sort().reverse().slice(0, 24);
 
-    const months = billingYMs.map(ym => {
-      const [y, m] = ym.split('-').map(Number);
-      const mData  = aggregateRange(new Date(y, m - 1, 1), new Date(y, m, 0));
-      const mHours = Object.values(mData).reduce((s, v) => s + v.hours, 0);
-      const mEarn  = this.calcEarnings(mData);
-      const inv    = State.invoices[ym] || null;
-      const label  = new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      return { ym, label, hours: mHours, earn: mEarn, inv };
-    }).filter(m => m.hours > 0 || m.inv);
-
-    // Status helper
+    // Status helper for a per-client invoice record
     const getStatus = inv => {
       if (!inv) return 'draft';
       if (inv.paidDate) return 'paid';
-      if (inv.sentDate || inv.legacy) return 'invoiced';
+      if (inv.sentDate) return 'invoiced';
       return 'draft';
     };
 
-    // Summary stats
-    const outstanding = months
-      .filter(m => getStatus(m.inv) !== 'paid')
-      .reduce((s, m) => s + m.earn, 0);
+    const statusConfig = {
+      draft:    { label: 'Not invoiced',     color: 'var(--text3)',   bg: 'rgba(0,0,0,0.05)' },
+      invoiced: { label: 'Awaiting payment', color: '#f59e0b',        bg: 'rgba(245,158,11,0.12)' },
+      paid:     { label: '\u2713 Paid',       color: 'var(--success)', bg: 'rgba(48,209,88,0.12)' },
+    };
 
-    const paidList = months.filter(m => m.inv && m.inv.sentDate && m.inv.paidDate);
-    const avgDays  = paidList.length > 0
-      ? Math.round(paidList.reduce((s, m) => {
-          const d1 = new Date(m.inv.sentDate + 'T00:00:00');
-          const d2 = new Date(m.inv.paidDate + 'T00:00:00');
-          return s + (d2 - d1) / 86400000;
-        }, 0) / paidList.length)
+    // Build per-month sections: each section has rows per client
+    let outstanding  = 0;
+    const paidDaysList = [];
+    let pendingCount = 0, draftCount = 0;
+    const sections   = [];
+
+    for (const ym of billingYMs) {
+      const [y, m]  = ym.split('-').map(Number);
+      const mData   = aggregateRange(new Date(y, m - 1, 1), new Date(y, m, 0));
+      const invMonth = State.invoices[ym] || {};
+      const label   = new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+      const rows = [];
+      for (const [clientId, { hours }] of Object.entries(mData)) {
+        if (hours === 0) continue;
+        const client = getClient(clientId);
+        if (!client) continue;
+        const earn   = hours * (client.rate || 0);
+        const inv    = invMonth[clientId] || null;
+        const status = getStatus(inv);
+
+        if (status !== 'paid') outstanding += earn;
+        if (status === 'invoiced') pendingCount++;
+        if (status === 'draft')    draftCount++;
+
+        if (inv && inv.sentDate && inv.paidDate) {
+          const d1 = new Date(inv.sentDate + 'T00:00:00');
+          const d2 = new Date(inv.paidDate + 'T00:00:00');
+          paidDaysList.push(Math.round((d2 - d1) / 86400000));
+        }
+
+        rows.push({ clientId, client, hours, earn, inv, status });
+      }
+
+      if (rows.length > 0) sections.push({ ym, label, rows });
+    }
+
+    const avgDays = paidDaysList.length > 0
+      ? Math.round(paidDaysList.reduce((s, d) => s + d, 0) / paidDaysList.length)
       : null;
-
-    const pendingCount = months.filter(m => getStatus(m.inv) === 'invoiced').length;
-    const draftCount   = months.filter(m => getStatus(m.inv) === 'draft' && m.hours > 0).length;
 
     // Build HTML
     let html = '<div style="height:16px"></div>';
@@ -1327,78 +1373,74 @@ const App = {
       <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);padding:14px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
         <div style="font-size:10px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:0.8px">Outstanding</div>
         <div style="font-size:22px;font-weight:700;margin-top:4px;letter-spacing:-0.8px;color:${outstanding > 0 ? 'var(--danger)' : 'var(--success)'}">${fmt$(outstanding)}</div>
-        <div style="font-size:11px;color:var(--text3);margin-top:2px">${draftCount} month${draftCount !== 1 ? 's' : ''} not invoiced</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px">${draftCount} invoice${draftCount !== 1 ? 's' : ''} not sent</div>
       </div>
       <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);padding:14px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
         <div style="font-size:10px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:0.8px">Avg. Wait</div>
         <div style="font-size:22px;font-weight:700;margin-top:4px;letter-spacing:-0.8px;color:var(--text)">${avgDays !== null ? avgDays + 'd' : '—'}</div>
-        <div style="font-size:11px;color:var(--text3);margin-top:2px">${pendingCount} invoice${pendingCount !== 1 ? 's' : ''} pending payment</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px">${pendingCount} awaiting payment</div>
       </div>
     </div>`;
 
-    // Month list
-    if (months.length === 0) {
+    if (sections.length === 0) {
       html += `<div class="empty-state"><div class="empty-icon">🧾</div><div class="empty-title">No billing data yet</div><div class="empty-sub">Start tracking time to see invoices here</div></div>`;
     } else {
-      html += `<div style="padding:0 16px"><div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.06)">`;
-      for (let i = 0; i < months.length; i++) {
-        const mo     = months[i];
-        const inv    = mo.inv;
-        const status = getStatus(inv);
-        const border = i < months.length - 1 ? 'border-bottom:0.5px solid var(--border);' : '';
+      for (const section of sections) {
+        html += `<div style="padding:0 16px 12px">
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;color:var(--text2);margin-bottom:8px">${section.label}</div>
+          <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.06)">`;
 
-        const statusConfig = {
-          draft:    { label: 'Not invoiced',      color: 'var(--text3)',   bg: 'rgba(0,0,0,0.05)' },
-          invoiced: { label: 'Awaiting payment',  color: '#f59e0b',        bg: 'rgba(245,158,11,0.12)' },
-          paid:     { label: '\u2713 Paid',        color: 'var(--success)', bg: 'rgba(48,209,88,0.12)' },
-        };
-        const sc = statusConfig[status];
+        section.rows.forEach((row, i) => {
+          const border = i < section.rows.length - 1 ? 'border-bottom:0.5px solid var(--border);' : '';
+          const sc     = statusConfig[row.status];
+          const inv    = row.inv;
+          let daysLabel = '';
+          if (inv && inv.sentDate && inv.paidDate) {
+            const days = Math.round((new Date(inv.paidDate + 'T00:00:00') - new Date(inv.sentDate + 'T00:00:00')) / 86400000);
+            daysLabel  = `${days}d to pay`;
+          }
+          html += `<div style="${border}padding:13px 16px;cursor:pointer;-webkit-tap-highlight-color:transparent"
+            onclick="App.openInvoiceModal('${section.ym}','${row.clientId}')">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <div style="width:8px;height:8px;border-radius:50%;background:${row.client.color};flex-shrink:0"></div>
+              <div style="font-size:14px;font-weight:600;color:var(--text);flex:1">${esc(row.client.name)}</div>
+              <span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;background:${sc.bg};color:${sc.color}">${sc.label}</span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding-left:16px">
+              <div style="font-size:12px;color:var(--text2)">${row.hours.toFixed(1)}h &middot; ${fmt$(row.earn)}</div>
+              <div style="font-size:12px;color:var(--text3)">${daysLabel}</div>
+            </div>
+            ${inv && (inv.sentDate || inv.paidDate) ? `<div style="margin-top:5px;padding-left:16px;display:flex;gap:14px">
+              ${inv.sentDate ? `<div style="font-size:11px;color:var(--text2)">Sent <span style="color:var(--text);font-weight:500">${formatShortDate(new Date(inv.sentDate + 'T00:00:00'))}</span></div>` : ''}
+              ${inv.paidDate ? `<div style="font-size:11px;color:var(--text2)">Paid <span style="color:var(--success);font-weight:500">${formatShortDate(new Date(inv.paidDate + 'T00:00:00'))}</span></div>` : ''}
+            </div>` : ''}
+          </div>`;
+        });
 
-        let daysLabel = '';
-        if (inv && inv.sentDate && inv.paidDate) {
-          const d1   = new Date(inv.sentDate + 'T00:00:00');
-          const d2   = new Date(inv.paidDate + 'T00:00:00');
-          const days = Math.round((d2 - d1) / 86400000);
-          daysLabel  = `${days}d to pay`;
-        }
-
-        html += `<div style="${border}padding:14px 16px;cursor:pointer;-webkit-tap-highlight-color:transparent"
-          onclick="App.openInvoiceModal('${mo.ym}')">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
-            <div style="font-size:15px;font-weight:600;color:var(--text)">${mo.label}</div>
-            <span style="font-size:11px;font-weight:600;padding:3px 8px;border-radius:20px;background:${sc.bg};color:${sc.color}">${sc.label}</span>
-          </div>
-          <div style="display:flex;align-items:center;justify-content:space-between">
-            <div style="font-size:13px;color:var(--text2)">${mo.hours.toFixed(1)}h &middot; ${fmt$(mo.earn)}</div>
-            <div style="font-size:12px;color:var(--text3)">${daysLabel}</div>
-          </div>
-          ${inv && (inv.sentDate || inv.paidDate) ? `<div style="margin-top:6px;display:flex;gap:16px">
-            ${inv.sentDate ? `<div style="font-size:12px;color:var(--text2)">Sent <span style="color:var(--text);font-weight:500">${formatShortDate(new Date(inv.sentDate + 'T00:00:00'))}</span></div>` : ''}
-            ${inv.paidDate ? `<div style="font-size:12px;color:var(--text2)">Paid <span style="color:var(--success);font-weight:500">${formatShortDate(new Date(inv.paidDate + 'T00:00:00'))}</span></div>` : ''}
-          </div>` : ''}
-        </div>`;
+        html += `</div></div>`;
       }
-      html += `</div></div>`;
     }
 
     html += `<div style="height:24px"></div>`;
     document.getElementById('billing-content').innerHTML = html;
   },
 
-  openInvoiceModal(ym) {
-    State.editingInvoiceYM = ym;
-    const inv = State.invoices[ym] || {};
+  openInvoiceModal(ym, clientId) {
+    State.editingInvoiceYM       = ym;
+    State.editingInvoiceClientId = clientId;
+    const inv    = (State.invoices[ym] || {})[clientId] || {};
+    const client = getClient(clientId);
     const [y, m] = ym.split('-').map(Number);
     const label  = new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-
-    // Compute hours/earnings for context
-    const mData  = aggregateRange(new Date(y, m - 1, 1), new Date(y, m, 0));
-    const mHours = Object.values(mData).reduce((s, v) => s + v.hours, 0);
-    const mEarn  = this.calcEarnings(mData);
     const fmt$   = v => '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+    // Per-client hours/earnings for this month
+    const mData  = aggregateRange(new Date(y, m - 1, 1), new Date(y, m, 0));
+    const hours  = mData[clientId]?.hours || 0;
+    const earn   = hours * ((client?.rate) || 0);
+
     document.getElementById('inv-modal-title').textContent = label;
-    document.getElementById('inv-modal-sub').textContent   = `${mHours.toFixed(1)}h · ${fmt$(mEarn)}`;
+    document.getElementById('inv-modal-sub').textContent   = `${client ? esc(client.name) : clientId} · ${hours.toFixed(1)}h · ${fmt$(earn)}`;
     document.getElementById('inv-sent-date').value = inv.sentDate || '';
     document.getElementById('inv-paid-date').value = inv.paidDate || '';
 
@@ -1409,37 +1451,44 @@ const App = {
   },
 
   async saveInvoiceModal() {
-    const ym = State.editingInvoiceYM;
-    if (!ym) return;
+    const ym       = State.editingInvoiceYM;
+    const clientId = State.editingInvoiceClientId;
+    if (!ym || !clientId) return;
 
     const sentDate = document.getElementById('inv-sent-date').value || null;
     const paidDate = document.getElementById('inv-paid-date').value || null;
 
+    if (!State.invoices[ym]) State.invoices[ym] = {};
     if (!sentDate && !paidDate) {
-      delete State.invoices[ym];
+      delete State.invoices[ym][clientId];
+      if (Object.keys(State.invoices[ym]).length === 0) delete State.invoices[ym];
     } else {
-      State.invoices[ym] = { sentDate, paidDate };
+      State.invoices[ym][clientId] = { sentDate, paidDate };
     }
 
     document.getElementById('invoice-modal').classList.remove('open');
-    State.editingInvoiceYM = null;
+    State.editingInvoiceYM = null; State.editingInvoiceClientId = null;
     this.renderBilling();
     await Gist.syncWithRetry();
   },
 
   async clearInvoiceDates() {
-    const ym = State.editingInvoiceYM;
-    if (!ym) return;
-    delete State.invoices[ym];
+    const ym       = State.editingInvoiceYM;
+    const clientId = State.editingInvoiceClientId;
+    if (!ym || !clientId) return;
+    if (State.invoices[ym]) {
+      delete State.invoices[ym][clientId];
+      if (Object.keys(State.invoices[ym]).length === 0) delete State.invoices[ym];
+    }
     document.getElementById('invoice-modal').classList.remove('open');
-    State.editingInvoiceYM = null;
+    State.editingInvoiceYM = null; State.editingInvoiceClientId = null;
     this.renderBilling();
     await Gist.syncWithRetry();
   },
 
   closeInvoiceModal() {
     document.getElementById('invoice-modal').classList.remove('open');
-    State.editingInvoiceYM = null;
+    State.editingInvoiceYM = null; State.editingInvoiceClientId = null;
   },
 
   calcEarnings(data) {
