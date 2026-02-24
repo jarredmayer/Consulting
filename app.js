@@ -1291,6 +1291,97 @@ const App = {
       </div>
     </div>`;
 
+    html += `<div style="height:0.5px;background:var(--border);margin:20px 16px 0"></div>`;
+
+    // ── 6-Month Daily Bar Chart ──────────────────────
+    const sixMoN      = 180;
+    const sixMoCardW  = Math.min(window.innerWidth, 430) - 64;
+    const sixMoBarW   = sixMoCardW / sixMoN;
+    const SIXMO_H     = 60;
+    const sixMoDays   = [];
+    for (let si = sixMoN - 1; si >= 0; si--) sixMoDays.push(addDays(today, -si));
+
+    const sixMoMax = Math.max(...sixMoDays.map(sd => Object.keys(State.blocks[dateKey(sd)] || {}).length * 0.5), 1);
+
+    let sixMoBars = '', sixMoTicks = '';
+    let sixMoLastMo = -1;
+    for (let si = 0; si < sixMoN; si++) {
+      const sd  = sixMoDays[si];
+      const sdk = dateKey(sd);
+      const sh  = Object.keys(State.blocks[sdk] || {}).length * 0.5;
+      const scounts = {};
+      for (const b of Object.values(State.blocks[sdk] || {})) {
+        if (b && b.clientId) scounts[b.clientId] = (scounts[b.clientId] || 0) + 1;
+      }
+      const sTop = Object.entries(scounts).sort((a, b) => b[1] - a[1])[0];
+      const sCl  = sTop ? getClient(sTop[0]) : null;
+      const sCol = sCl ? sCl.color : '#6c63ff';
+      const sbH  = sh > 0 ? Math.max((sh / sixMoMax) * SIXMO_H, 2) : 0;
+      const sx   = si * sixMoBarW;
+
+      if (sbH > 0) {
+        sixMoBars += `<rect x="${sx.toFixed(2)}" y="${(SIXMO_H - sbH).toFixed(2)}" width="${Math.max(sixMoBarW - 0.5, 1).toFixed(2)}" height="${sbH.toFixed(2)}" fill="${sCol}" opacity="0.85" rx="0.5"/>`;
+      }
+      if (isToday(sd)) {
+        sixMoBars += `<line x1="${(sx + sixMoBarW / 2).toFixed(2)}" y1="0" x2="${(sx + sixMoBarW / 2).toFixed(2)}" y2="${SIXMO_H}" stroke="var(--accent)" stroke-width="1.5" opacity="0.5"/>`;
+      }
+      const sMo = sd.getMonth();
+      if (sMo !== sixMoLastMo) {
+        const sLbl = sd.toLocaleDateString('en-US', { month: 'short' });
+        sixMoTicks += `<line x1="${sx.toFixed(2)}" y1="0" x2="${sx.toFixed(2)}" y2="${SIXMO_H}" stroke="var(--border)" stroke-width="0.5"/>`;
+        sixMoTicks += `<text x="${(sx + 2).toFixed(2)}" y="${SIXMO_H + 11}" style="font-size:9px;fill:var(--text3);font-family:-apple-system,sans-serif">${sLbl}</text>`;
+        sixMoLastMo = sMo;
+      }
+    }
+
+    html += `<div style="padding:16px 16px 0">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;color:var(--text2);margin-bottom:12px">6 Months</div>
+      <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);padding:16px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+        <svg width="${sixMoCardW}" height="${SIXMO_H + 16}" viewBox="0 0 ${sixMoCardW} ${SIXMO_H + 16}" style="display:block">
+          ${sixMoTicks}${sixMoBars}
+        </svg>
+      </div>
+    </div>`;
+
+    html += `<div style="height:0.5px;background:var(--border);margin:20px 16px 0"></div>`;
+
+    // ── Trends: month vs last month + projected year ─
+    const curMoStart    = startOfMonth(today);
+    const prevMoStart   = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const daysInPrevMo  = new Date(today.getFullYear(), today.getMonth(), 0).getDate();
+    const prevMoSameDay = new Date(today.getFullYear(), today.getMonth() - 1, Math.min(today.getDate(), daysInPrevMo));
+    const curMoData     = aggregateRange(curMoStart, today);
+    const curMoHours    = Object.values(curMoData).reduce((s, v) => s + v.hours, 0);
+    const prevMoData    = aggregateRange(prevMoStart, prevMoSameDay);
+    const prevMoHours   = Object.values(prevMoData).reduce((s, v) => s + v.hours, 0);
+    const moGap         = curMoHours - prevMoHours;
+    const moGapColor    = moGap >= 0 ? 'var(--success)' : 'var(--danger)';
+    const prevMoName    = prevMoStart.toLocaleDateString('en-US', { month: 'short' });
+
+    const ytdStart    = new Date(today.getFullYear(), 0, 1);
+    const ytdData2    = aggregateRange(ytdStart, today);
+    const ytdHours    = Object.values(ytdData2).reduce((s, v) => s + v.hours, 0);
+    const ytdEarnings = this.calcEarnings(ytdData2);
+    const elapsedDays = Math.max(1, Math.round((today - ytdStart) / 86400000) + 1);
+    const projYrHours = Math.round(ytdHours / elapsedDays * 365);
+    const projYrEarn  = Math.round(ytdEarnings / elapsedDays * 365);
+
+    html += `<div style="padding:16px 16px 0">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;color:var(--text2);margin-bottom:12px">Trends</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);padding:14px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+          <div style="font-size:10px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:0.8px">vs Last Month</div>
+          <div style="font-size:22px;font-weight:700;margin-top:4px;letter-spacing:-0.8px;color:${moGapColor}">${moGap >= 0 ? '+' : ''}${moGap.toFixed(1)}h</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">${curMoHours.toFixed(1)}h vs ${prevMoHours.toFixed(1)}h in ${prevMoName}</div>
+        </div>
+        <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);padding:14px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+          <div style="font-size:10px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:0.8px">Year Pace</div>
+          <div style="font-size:22px;font-weight:700;margin-top:4px;letter-spacing:-0.8px;color:var(--text)">${projYrHours.toLocaleString()}h</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">$${projYrEarn.toLocaleString()} on current pace</div>
+        </div>
+      </div>
+    </div>`;
+
     html += `<div style="height:24px"></div>`;
 
     document.getElementById('dashboard-content').innerHTML = html;
