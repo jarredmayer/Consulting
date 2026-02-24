@@ -1,9 +1,9 @@
-const CACHE_NAME = 'workflow-v16';
+const CACHE_NAME = 'workflow-v17';
 const STATIC_ASSETS = [
   '/Consulting/',
   '/Consulting/index.html',
   '/Consulting/seed-data.js?v=3',
-  '/Consulting/app.js?v=21',
+  '/Consulting/app.js?v=22',
   '/Consulting/manifest.json'
 ];
 

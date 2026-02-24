@@ -1125,7 +1125,6 @@ const App = {
     html += `<div style="padding:0 16px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <div style="font-size:11px;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;color:var(--text2)">Activity</div>
-        ${streak > 0 ? `<div style="font-size:12px;font-weight:600;color:var(--accent)">${streak}d streak</div>` : ''}
       </div>
       <div style="display:flex;gap:${GAP}px">`;
     html += `<div style="display:flex;flex-direction:column;gap:${GAP}px">`;
