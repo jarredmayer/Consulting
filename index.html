@@ -656,6 +656,13 @@
     <div class="screen-scroll" id="summary-content"></div>
   </div>
 
+  <div class="screen" id="screen-billing">
+    <div class="screen-header">
+      <div class="screen-title">Billing</div>
+    </div>
+    <div class="screen-scroll" id="billing-content"></div>
+  </div>
+
   <div class="screen" id="screen-settings">
     <div class="screen-header">
       <div class="screen-title">Settings</div>
@@ -684,6 +691,13 @@
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
       </svg>
       <span class="tab-label">Summary</span>
+    </button>
+    <button class="tab-btn" data-tab="billing" onclick="App.switchTab('billing')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="6 3 6 21 8 20 10 21 12 20 14 21 16 20 18 21 18 3 6 3"/>
+        <line x1="9" y1="8" x2="15" y2="8"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="12" y2="16"/>
+      </svg>
+      <span class="tab-label">Billing</span>
     </button>
     <button class="tab-btn" data-tab="settings" onclick="App.switchTab('settings')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -786,10 +800,38 @@
   </div>
 </div>
 
+<!-- Invoice Modal -->
+<div class="modal-backdrop" id="invoice-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="inv-modal-title">Invoice</div>
+        <div style="font-size:13px;color:var(--text2);margin-top:2px" id="inv-modal-sub"></div>
+      </div>
+      <button class="modal-close" onclick="App.closeInvoiceModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label class="field-label">Invoice Sent</label>
+        <input class="input date-input" type="date" id="inv-sent-date" style="width:100%" />
+      </div>
+      <div class="field">
+        <label class="field-label">Payment Received</label>
+        <input class="input date-input" type="date" id="inv-paid-date" style="width:100%" />
+      </div>
+      <div class="flex-row mt-8" style="margin-bottom:12px">
+        <button class="btn btn-danger" id="inv-clear-btn" onclick="App.clearInvoiceDates()" style="display:none">Clear dates</button>
+        <button class="btn btn-primary btn-full" onclick="App.saveInvoiceModal()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div id="toast"></div>
 
 <script src="seed-data.js?v=3"></script>
-<script src="app.js?v=17"></script>
+<script src="app.js?v=18"></script>
 </body>
 </html>
