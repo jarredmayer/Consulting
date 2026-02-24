@@ -40,6 +40,7 @@ const State = {
   editingProjectId: null,
   syncing:      false,
   initialized:  false,
+  invoices:     {},   // { 'YYYY-MM': true } months marked invoiced
 };
 
 // ── Local Storage helpers ──────────────────────────────────
@@ -152,6 +153,7 @@ const Gist = {
     State.projects = parsed.projects || [];
     State.blocks   = parsed.blocks   || {};
     State.icalUrl  = parsed.icalUrl  || State.icalUrl;
+    State.invoices = parsed.invoices || {};
   },
 
   async save() {
@@ -160,6 +162,7 @@ const Gist = {
       projects: State.projects,
       blocks:   State.blocks,
       icalUrl:  State.icalUrl || null,
+      invoices: State.invoices,
     };
     const res = await fetch(`https://api.github.com/gists/${State.gistId}`, {
       method: 'PATCH',
@@ -990,65 +993,196 @@ const App = {
     await Gist.syncWithRetry();
   },
 
-  // ── Dashboard ────────────────────────────────────────────
+  // ── Activity (Dashboard) ─────────────────────────────────
   renderDashboard() {
     const today     = new Date();
     const weekStart = startOfWeek(today);
-    const weekEnd   = addDays(weekStart, 6);
-    const monthStart = startOfMonth(today);
-    const monthEnd   = endOfMonth(today);
+    const prevStart = addDays(weekStart, -7);
 
-    const weekData  = aggregateRange(weekStart, weekEnd);
-    const monthData = aggregateRange(monthStart, monthEnd);
+    // ── Current week per-day data ────────────────────
+    const DAYS_SHORT = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+    const weekDays = [];
+    for (let i = 0; i < 7; i++) {
+      const d  = addDays(weekStart, i);
+      const dk = dateKey(d);
+      const dayData = State.blocks[dk] || {};
+      const hours   = Object.keys(dayData).length * 0.5;
+      const counts  = {};
+      for (const b of Object.values(dayData)) {
+        if (b && b.clientId) counts[b.clientId] = (counts[b.clientId] || 0) + 1;
+      }
+      const top    = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+      const client = top ? getClient(top[0]) : null;
+      weekDays.push({ date: d, hours, color: client ? client.color : null, today: isToday(d) });
+    }
+    const weekHours    = weekDays.reduce((s, d) => s + d.hours, 0);
+    const weekData     = aggregateRange(weekStart, addDays(weekStart, 6));
+    const weekEarnings = this.calcEarnings(weekData);
+    const prevData     = aggregateRange(prevStart, addDays(prevStart, 6));
+    const prevHours    = Object.values(prevData).reduce((s, v) => s + v.hours, 0);
+    const delta        = weekHours - prevHours;
+    const deltaStr     = (weekHours > 0 && prevHours > 0)
+      ? `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}h vs last week` : '';
+    const deltaColor   = delta >= 0 ? 'var(--success)' : 'var(--danger)';
 
-    const weekHours  = Object.values(weekData).reduce((s, v) => s + v.hours, 0);
-    const monthHours = Object.values(monthData).reduce((s, v) => s + v.hours, 0);
-    const weekEarnings  = this.calcEarnings(weekData);
-    const monthEarnings = this.calcEarnings(monthData);
+    // ── Heatmap layout ───────────────────────────────
+    const CELL = 12, GAP = 3, LABEL_W = 14;
+    const contentW  = Math.min(window.innerWidth, 430) - 32;
+    const WEEKS     = Math.floor((contentW - LABEL_W) / (CELL + GAP));
+    const heatStart = startOfWeek(addDays(today, -(WEEKS - 1) * 7));
 
-    let html = '';
+    // ── Work streak ──────────────────────────────────
+    let streak = 0;
+    let ck = new Date(today); ck.setHours(0, 0, 0, 0);
+    if (Object.keys(State.blocks[dateKey(ck)] || {}).length === 0) ck = addDays(ck, -1);
+    while (streak < 365) {
+      if (Object.keys(State.blocks[dateKey(ck)] || {}).length === 0) break;
+      streak++;
+      ck = addDays(ck, -1);
+    }
 
-    // Summary stats
-    html += `<div style="height:12px"></div>`;
-    html += `<div class="stat-grid">
-      <div class="stat-card">
-        <div class="stat-label">This Week</div>
-        <div class="stat-value">${weekHours.toFixed(1)}h</div>
-        <div class="stat-sub">${formatShortDate(weekStart)} – ${formatShortDate(weekEnd)}</div>
+    // ── Billing months ───────────────────────────────
+    const monthsSet = new Set();
+    for (const dk of Object.keys(State.blocks)) {
+      if (Object.keys(State.blocks[dk]).length > 0) monthsSet.add(dk.slice(0, 7));
+    }
+    monthsSet.add(dateKey(today).slice(0, 7));
+    const billingMonths = [...monthsSet].sort().reverse().slice(0, 12);
+    let totalUnbilled = 0;
+    const fmt$ = v => '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const monthRows = billingMonths.map(ym => {
+      const [y, m] = ym.split('-').map(Number);
+      const mData  = aggregateRange(new Date(y, m - 1, 1), new Date(y, m, 0));
+      const mHours = Object.values(mData).reduce((s, v) => s + v.hours, 0);
+      const mEarn  = this.calcEarnings(mData);
+      const inv    = !!State.invoices[ym];
+      if (!inv) totalUnbilled += mEarn;
+      const label  = new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      return { ym, label, hours: mHours, earn: mEarn, invoiced: inv };
+    });
+
+    // ── Build HTML ───────────────────────────────────
+    const maxDayH = Math.max(...weekDays.map(d => d.hours), 1);
+    const BAR_H   = 52;
+    let html      = '<div style="height:16px"></div>';
+
+    // — Week totals —
+    html += `<div style="padding:0 20px 16px;display:flex;justify-content:space-between;align-items:flex-end">
+      <div>
+        <div style="font-size:11px;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;color:var(--text2);margin-bottom:3px">This Week</div>
+        <div style="font-size:42px;font-weight:700;letter-spacing:-2px;line-height:1;color:var(--text)">${weekHours.toFixed(1)}<span style="font-size:20px;font-weight:500;color:var(--text2)">h</span></div>
+        ${deltaStr ? `<div style="font-size:12px;color:${deltaColor};margin-top:4px;font-weight:500">${deltaStr}</div>` : '<div style="height:16px"></div>'}
       </div>
-      <div class="stat-card">
-        <div class="stat-label">Earnings</div>
-        <div class="stat-value text-success">$${weekEarnings.toLocaleString()}</div>
-        <div class="stat-sub">this week</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">This Month</div>
-        <div class="stat-value">${monthHours.toFixed(1)}h</div>
-        <div class="stat-sub">${formatMonthYear(today)}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Earnings</div>
-        <div class="stat-value text-success">$${monthEarnings.toLocaleString()}</div>
-        <div class="stat-sub">this month</div>
+      <div style="text-align:right">
+        <div style="font-size:11px;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;color:var(--text2);margin-bottom:3px">Earned</div>
+        <div style="font-size:32px;font-weight:700;letter-spacing:-1.5px;line-height:1;color:var(--success)">$${weekEarnings.toLocaleString()}</div>
       </div>
     </div>`;
 
-    // Week bar chart
-    html += `<div class="section-label">This Week by Client</div>`;
-    html += `<div class="card mb-0">`;
-    html += this.barChart(weekData, weekHours);
+    // — Day bars —
+    html += `<div style="padding:0 16px 16px"><div style="display:flex;gap:4px">`;
+    for (const day of weekDays) {
+      const bh     = day.hours > 0 ? Math.max((day.hours / maxDayH) * BAR_H, 4) : 0;
+      const color  = day.color || '#6c63ff';
+      const filled = day.hours > 0;
+      html += `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;border-radius:10px;padding:8px 0;${day.today ? 'background:rgba(108,99,255,0.07)' : ''}">
+        <div style="height:${BAR_H}px;display:flex;align-items:flex-end;width:100%;justify-content:center">
+          <div style="width:22px;height:${bh}px;background:${filled ? color : 'var(--bg3)'};border-radius:4px;opacity:${filled ? 0.9 : 1}"></div>
+        </div>
+        <div style="font-size:10px;font-weight:${day.today ? 700 : 500};color:${day.today ? 'var(--accent)' : 'var(--text3)'};line-height:1">${DAYS_SHORT[day.date.getDay()]}</div>
+        <div style="font-size:10px;color:${filled ? 'var(--text2)' : 'var(--text3)'};line-height:1">${filled ? day.hours.toFixed(1) : '\xb7'}</div>
+      </div>`;
+    }
+    html += `</div></div>`;
+
+    // Divider
+    html += `<div style="height:0.5px;background:var(--border);margin:0 16px 20px"></div>`;
+
+    // — Activity heatmap —
+    const HEAT_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+    html += `<div style="padding:0 16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;color:var(--text2)">Activity</div>
+        ${streak > 0 ? `<div style="font-size:12px;font-weight:600;color:var(--accent)">${streak}d streak</div>` : ''}
+      </div>
+      <div style="display:flex;gap:${GAP}px">`;
+    html += `<div style="display:flex;flex-direction:column;gap:${GAP}px">`;
+    for (let dow = 0; dow < 7; dow++) {
+      html += `<div style="width:${LABEL_W - 4}px;height:${CELL}px;font-size:8px;color:var(--text3);display:flex;align-items:center;justify-content:flex-end;padding-right:2px">${[1, 3, 5].includes(dow) ? HEAT_LABELS[dow] : ''}</div>`;
+    }
+    html += `</div>`;
+    for (let w = 0; w < WEEKS; w++) {
+      const wStart = addDays(heatStart, w * 7);
+      html += `<div style="display:flex;flex-direction:column;gap:${GAP}px">`;
+      for (let dow = 0; dow < 7; dow++) {
+        const d  = addDays(wStart, dow);
+        const dk = dateKey(d);
+        if (d > today) { html += `<div style="width:${CELL}px;height:${CELL}px"></div>`; continue; }
+        const dayData = State.blocks[dk] || {};
+        const hours   = Object.keys(dayData).length * 0.5;
+        const counts  = {};
+        for (const b of Object.values(dayData)) {
+          if (b && b.clientId) counts[b.clientId] = (counts[b.clientId] || 0) + 1;
+        }
+        const top2 = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+        const cc   = top2 ? getClient(top2[0]) : null;
+        const base = cc ? cc.color : '#6c63ff';
+        const bg   = hours === 0 ? 'var(--bg3)' : hexToRgba(base, Math.min(0.2 + (hours / 8) * 0.8, 1));
+        const ring = isToday(d) ? `outline:1.5px solid var(--accent);outline-offset:1px;` : '';
+        html += `<div style="width:${CELL}px;height:${CELL}px;border-radius:2.5px;background:${bg};${ring}"></div>`;
+      }
+      html += `</div>`;
+    }
+    html += `</div>`;
+    html += `<div style="display:flex;align-items:center;gap:4px;margin-top:8px;justify-content:flex-end">
+      <span style="font-size:9px;color:var(--text3);margin-right:1px">Less</span>
+      ${[0, 0.25, 0.5, 0.75, 1].map(a =>
+        `<div style="width:${CELL}px;height:${CELL}px;border-radius:2.5px;background:${a === 0 ? 'var(--bg3)' : `rgba(108,99,255,${a})`}"></div>`
+      ).join('')}
+      <span style="font-size:9px;color:var(--text3);margin-left:1px">More</span>
+    </div>`;
     html += `</div>`;
 
-    // Month bar chart
-    html += `<div class="section-label">This Month by Client</div>`;
-    html += `<div class="card" style="margin-bottom:20px">`;
-    html += this.barChart(monthData, monthHours);
-    html += `</div>`;
+    // Divider
+    html += `<div style="height:0.5px;background:var(--border);margin:20px 16px 0"></div>`;
 
-    // By project breakdown (month)
-    html += this.projectBreakdownHTML(monthData, 'Month by Project');
+    // — Billing —
+    html += `<div style="padding:0 16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 0 12px">
+        <div style="font-size:11px;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;color:var(--text2)">Billing</div>
+        <div style="font-size:13px;color:var(--text2)">Outstanding: <span style="font-weight:700;color:${totalUnbilled > 0 ? 'var(--danger)' : 'var(--success)'}">${fmt$(totalUnbilled)}</span></div>
+      </div>
+      <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.06)">`;
+    for (let i = 0; i < monthRows.length; i++) {
+      const row    = monthRows[i];
+      const border = i < monthRows.length - 1 ? 'border-bottom:0.5px solid var(--border);' : '';
+      html += `<div style="display:flex;align-items:center;padding:12px 16px;gap:12px;${border}">
+        <div style="flex:1">
+          <div style="font-size:14px;font-weight:600;color:var(--text)">${row.label}</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:1px">${row.hours.toFixed(1)}h \xb7 ${fmt$(row.earn)}</div>
+        </div>
+        <button onclick="App.toggleInvoice('${row.ym}')"
+          style="padding:5px 12px;border-radius:20px;border:none;cursor:pointer;font-family:var(--font);font-size:12px;font-weight:600;
+            background:${row.invoiced ? 'rgba(48,209,88,0.12)' : 'rgba(0,0,0,0.05)'};
+            color:${row.invoiced ? 'var(--success)' : 'var(--text2)'};
+            -webkit-tap-highlight-color:transparent">
+          ${row.invoiced ? '\u2713 Invoiced' : 'Pending'}
+        </button>
+      </div>`;
+    }
+    html += `</div></div><div style="height:24px"></div>`;
 
     document.getElementById('dashboard-content').innerHTML = html;
+  },
+
+  async toggleInvoice(ym) {
+    if (State.invoices[ym]) {
+      delete State.invoices[ym];
+    } else {
+      State.invoices[ym] = true;
+    }
+    this.renderDashboard();
+    await Gist.syncWithRetry();
   },
 
   calcEarnings(data) {
@@ -1058,51 +1192,6 @@ const App = {
       if (client) total += hours * (client.rate || 0);
     }
     return total;
-  },
-
-  barChart(data, totalHours) {
-    if (Object.keys(data).length === 0) {
-      return `<div class="empty-state" style="padding:24px 0">
-        <div class="empty-sub">No tracked time</div>
-      </div>`;
-    }
-    const max = Math.max(...Object.values(data).map(v => v.hours));
-    let html = '<div class="bar-chart">';
-    for (const [clientId, { hours }] of Object.entries(data)) {
-      const client = getClient(clientId);
-      const pct = max > 0 ? (hours / max * 100).toFixed(1) : 0;
-      const color = client ? client.color : '#6c63ff';
-      const name  = client ? client.name : 'Unknown';
-      html += `<div class="bar-row">
-        <div class="bar-label">${esc(name)}</div>
-        <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>
-        <div class="bar-val">${hours.toFixed(1)}h</div>
-      </div>`;
-    }
-    html += '</div>';
-    return html;
-  },
-
-  projectBreakdownHTML(data, title) {
-    if (Object.keys(data).length === 0) return '';
-    let html = `<div class="section-label">${title}</div>`;
-    for (const [clientId, { byProject }] of Object.entries(data)) {
-      const client = getClient(clientId);
-      if (!client) continue;
-      for (const [projectId, hours] of Object.entries(byProject)) {
-        const proj = getProject(projectId);
-        html += `<div class="card" style="margin-bottom:8px;padding:12px 16px">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <div>
-              <div style="font-size:11px;font-weight:600;color:${client.color};text-transform:uppercase;letter-spacing:0.5px">${esc(client.name)}</div>
-              <div style="font-size:14px;font-weight:600">${proj ? esc(proj.name) : 'Unassigned'}</div>
-            </div>
-            <div style="font-size:15px;font-weight:700">${hours.toFixed(1)}h</div>
-          </div>
-        </div>`;
-      }
-    }
-    return html + `<div style="height:20px"></div>`;
   },
 
   // ── Summary ──────────────────────────────────────────────
