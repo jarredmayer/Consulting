@@ -42,6 +42,7 @@ const State = {
   initialized:  false,
   invoices:     {},   // { 'YYYY-MM': { sentDate, paidDate, legacy? } }
   editingInvoiceYM: null,
+  weeklyHoursTarget: 50,  // user-adjustable weekly hours upper bound
 };
 
 // ── Local Storage helpers ──────────────────────────────────
@@ -164,15 +165,17 @@ const Gist = {
         State.invoices[ym] = { sentDate: val.sentDate || null, paidDate: val.paidDate || null, ...(val.legacy ? { legacy: true } : {}) };
       }
     }
+    State.weeklyHoursTarget = parsed.weeklyHoursTarget || 50;
   },
 
   async save() {
     const payload = {
-      clients:  State.clients,
-      projects: State.projects,
-      blocks:   State.blocks,
-      icalUrl:  State.icalUrl || null,
-      invoices: State.invoices,
+      clients:           State.clients,
+      projects:          State.projects,
+      blocks:            State.blocks,
+      icalUrl:           State.icalUrl || null,
+      invoices:          State.invoices,
+      weeklyHoursTarget: State.weeklyHoursTarget,
     };
     const res = await fetch(`https://api.github.com/gists/${State.gistId}`, {
       method: 'PATCH',
@@ -1134,6 +1137,132 @@ const App = {
     </div>`;
     html += `</div>`;
 
+    // Divider
+    html += `<div style="height:0.5px;background:var(--border);margin:20px 16px 0"></div>`;
+
+    // ── Monthly Pace Ring ────────────────────────────
+    const monthStartP = startOfMonth(today);
+    const monthEndP   = endOfMonth(today);
+    let totalWorkdays = 0, elapsedWorkdays = 0;
+    { let wd = new Date(monthStartP);
+      while (wd <= monthEndP) {
+        const dow = wd.getDay();
+        if (dow !== 0 && dow !== 6) { totalWorkdays++; if (wd <= today) elapsedWorkdays++; }
+        wd = addDays(wd, 1);
+      }
+    }
+    const dailyTarget  = (State.weeklyHoursTarget || 50) / 5;
+    const monthTarget  = totalWorkdays * dailyTarget;
+    const paceTarget   = elapsedWorkdays * dailyTarget;
+    const paceMonthData = aggregateRange(monthStartP, today);
+    const currHours    = Object.values(paceMonthData).reduce((s, v) => s + v.hours, 0);
+    const pacePct      = monthTarget > 0 ? Math.min(currHours / monthTarget, 1) : 0;
+    const paceDelta    = currHours - paceTarget;
+    const paceColor    = paceDelta >= 0 ? 'var(--success)' : (paceDelta >= -8 ? '#f59e0b' : 'var(--danger)');
+    const remaining    = totalWorkdays - elapsedWorkdays;
+    const paceStr      = elapsedWorkdays === 0 ? 'Month just started'
+      : paceDelta === 0 ? 'Exactly on pace'
+      : paceDelta > 0   ? `${paceDelta.toFixed(1)}h ahead of pace`
+      :                   `${Math.abs(paceDelta).toFixed(1)}h behind pace`;
+
+    const PR = 40, PCX = 52, PCY = 52;
+    const pCirc = 2 * Math.PI * PR;
+    const pFill = pacePct * pCirc;
+
+    html += `<div style="padding:16px 16px 0">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;color:var(--text2);margin-bottom:12px">Monthly Pace</div>
+      <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);padding:16px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+        <div style="display:flex;align-items:center;gap:20px">
+          <svg width="104" height="104" viewBox="0 0 104 104" style="flex-shrink:0">
+            <circle cx="${PCX}" cy="${PCY}" r="${PR}" fill="none" stroke="var(--bg3)" stroke-width="10"/>
+            ${pFill > 0.1 ? `<circle cx="${PCX}" cy="${PCY}" r="${PR}" fill="none" stroke="${paceColor}" stroke-width="10"
+              stroke-dasharray="${pFill.toFixed(2)} ${(pCirc - pFill).toFixed(2)}"
+              stroke-linecap="round"
+              transform="rotate(-90 ${PCX} ${PCY})"/>` : ''}
+            <text x="${PCX}" y="${PCY - 4}" text-anchor="middle" style="font-size:18px;font-weight:700;fill:var(--text);font-family:-apple-system,sans-serif">${currHours.toFixed(1)}</text>
+            <text x="${PCX}" y="${PCY + 12}" text-anchor="middle" style="font-size:9px;fill:var(--text2);font-family:-apple-system,sans-serif">of ${monthTarget.toFixed(0)}h</text>
+          </svg>
+          <div style="flex:1">
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.3px;text-transform:uppercase;color:var(--text2)">${today.toLocaleDateString('en-US',{month:'long',year:'numeric'})}</div>
+            <div style="font-size:30px;font-weight:700;letter-spacing:-1.2px;line-height:1;color:var(--text);margin:4px 0">${(pacePct*100).toFixed(0)}<span style="font-size:17px;font-weight:500;color:var(--text2)">%</span></div>
+            <div style="font-size:12px;color:${paceColor};font-weight:600;margin-bottom:8px">${paceStr}</div>
+            <div style="font-size:11px;color:var(--text3)">${remaining} workday${remaining!==1?'s':''} left</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:1px">Target: ${monthTarget.toFixed(0)}h (${State.weeklyHoursTarget}h/wk)</div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+    // Divider
+    html += `<div style="height:0.5px;background:var(--border);margin:20px 16px 0"></div>`;
+
+    // ── Work Rhythm ──────────────────────────────────
+    const RHOURS    = [];
+    for (let h = DAY_START; h < DAY_END; h++) RHOURS.push(h);
+    const RDAY_LBLS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    // Count blocks per (dow=Mon-0..Sun-6, hour) and how many days each dow has data
+    const rgrid    = {};
+    const rdayCount = new Array(7).fill(0);
+    for (const [dk2, dayData] of Object.entries(State.blocks)) {
+      const slots = Object.values(dayData).filter(b => b && b.clientId);
+      if (slots.length === 0) continue;
+      const d2  = new Date(dk2 + 'T12:00:00');
+      const dow = (d2.getDay() + 6) % 7;
+      rdayCount[dow]++;
+      for (const slot of Object.keys(dayData)) {
+        const b = dayData[slot];
+        if (!b || !b.clientId) continue;
+        const h = parseInt(slot.split(':')[0]);
+        if (!rgrid[dow]) rgrid[dow] = {};
+        rgrid[dow][h] = (rgrid[dow][h] || 0) + 1;
+      }
+    }
+    let rmaxNorm = 0;
+    for (let dow = 0; dow < 7; dow++) {
+      if (rdayCount[dow] === 0) continue;
+      for (const h of RHOURS) {
+        const n = (rgrid[dow]?.[h] || 0) / rdayCount[dow];
+        if (n > rmaxNorm) rmaxNorm = n;
+      }
+    }
+    if (rmaxNorm === 0) rmaxNorm = 1;
+
+    const RLABEL_W  = 28;
+    const RGAP      = 2;
+    const rContentW = Math.min(window.innerWidth, 430) - 64; // screen padding + card padding
+    const RCELL     = Math.max(14, Math.floor((rContentW - RLABEL_W - RGAP * (RHOURS.length - 1)) / RHOURS.length));
+
+    let rhythmHtml = '';
+    // Hour labels (top row, sparse)
+    rhythmHtml += `<div style="display:flex;gap:${RGAP}px;margin-bottom:4px;margin-left:${RLABEL_W}px">`;
+    for (const h of RHOURS) {
+      const show  = [7, 10, 13, 16, 19].includes(h);
+      const lbl   = show ? (h === 12 ? '12p' : h > 12 ? `${h-12}p` : `${h}a`) : '';
+      rhythmHtml += `<div style="width:${RCELL}px;font-size:8px;color:var(--text3);text-align:center">${lbl}</div>`;
+    }
+    rhythmHtml += '</div>';
+    // Day rows
+    for (let dow = 0; dow < 7; dow++) {
+      rhythmHtml += `<div style="display:flex;align-items:center;gap:${RGAP}px;margin-bottom:${RGAP}px">`;
+      rhythmHtml += `<div style="width:${RLABEL_W - RGAP}px;font-size:10px;color:var(--text3);text-align:right;padding-right:4px">${RDAY_LBLS[dow]}</div>`;
+      for (const h of RHOURS) {
+        const count = rgrid[dow]?.[h] || 0;
+        const norm  = rdayCount[dow] > 0 ? (count / rdayCount[dow]) / rmaxNorm : 0;
+        const bg    = norm === 0 ? 'var(--bg3)' : hexToRgba('#6c63ff', Math.min(0.15 + norm * 0.85, 1));
+        rhythmHtml += `<div style="width:${RCELL}px;height:${RCELL}px;border-radius:3px;background:${bg}"></div>`;
+      }
+      rhythmHtml += '</div>';
+    }
+
+    html += `<div style="padding:16px 16px 0">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;color:var(--text2);margin-bottom:12px">Work Rhythm</div>
+      <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);padding:16px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+        ${rhythmHtml}
+        <div style="font-size:10px;color:var(--text3);text-align:right;margin-top:6px">Based on all tracked history</div>
+      </div>
+    </div>`;
+
     html += `<div style="height:24px"></div>`;
 
     document.getElementById('dashboard-content').innerHTML = html;
@@ -1628,6 +1757,20 @@ const App = {
     }
 
     // Data section
+    // Targets section
+    html += `<div class="section-label">Targets</div>`;
+    html += `<div class="card">
+      <div class="field mb-0">
+        <label class="field-label">Weekly hours target</label>
+        <div style="display:flex;gap:10px;align-items:center">
+          <input class="input" type="number" id="weekly-target-input"
+            value="${State.weeklyHoursTarget || 50}" min="1" max="168" style="flex:1" />
+          <button class="btn btn-secondary" onclick="App.saveWeeklyTarget()">Save</button>
+        </div>
+        <div class="onboard-note" style="margin-top:6px">Sets your upper bound. Monthly pace target is calculated from actual workdays in the month.</div>
+      </div>
+    </div>`;
+
     html += `<div class="section-label">Data</div>`;
     html += `<div class="card mb-0" style="padding:0">
       <div class="setting-row" style="border-bottom:none">
@@ -1640,6 +1783,14 @@ const App = {
 
     html += `<div style="height:20px"></div>`;
     document.getElementById('settings-content').innerHTML = html;
+  },
+
+  async saveWeeklyTarget() {
+    const val = parseFloat(document.getElementById('weekly-target-input').value);
+    if (!val || val < 1) { showToast('Enter a valid target'); return; }
+    State.weeklyHoursTarget = val;
+    await Gist.syncWithRetry();
+    showToast('Target saved ✓');
   },
 
   async saveIcal() {
