@@ -1292,52 +1292,84 @@ const App = {
 
     html += `<div style="height:0.5px;background:var(--border);margin:20px 16px 0"></div>`;
 
-    // ── 6-Month Daily Bar Chart ──────────────────────
-    const sixMoN      = 180;
-    const sixMoCardW  = Math.min(window.innerWidth, 430) - 64;
-    const sixMoBarW   = sixMoCardW / sixMoN;
-    const SIXMO_H     = 60;
-    const sixMoDays   = [];
-    for (let si = sixMoN - 1; si >= 0; si--) sixMoDays.push(addDays(today, -si));
+    // ── Momentum: 7-day rolling average line chart ──
+    const moN     = 180;
+    const moCardW = Math.min(window.innerWidth, 430) - 64;
+    const moBW    = moCardW / moN;
+    const MO_H    = 64;
+    const moDays  = [];
+    for (let mi = moN - 1; mi >= 0; mi--) moDays.push(addDays(today, -mi));
 
-    const sixMoMax = Math.max(...sixMoDays.map(sd => Object.keys(State.blocks[dateKey(sd)] || {}).length * 0.5), 1);
+    // Daily hours + dominant client color per day
+    const moDailyH  = moDays.map(md => Object.keys(State.blocks[dateKey(md)] || {}).length * 0.5);
+    const moDailyCl = moDays.map(md => {
+      const mdk = dateKey(md);
+      const mc = {};
+      for (const b of Object.values(State.blocks[mdk] || {})) {
+        if (b && b.clientId) mc[b.clientId] = (mc[b.clientId] || 0) + 1;
+      }
+      const mt = Object.entries(mc).sort((a, b) => b[1] - a[1])[0];
+      const mcl = mt ? getClient(mt[0]) : null;
+      return mcl ? mcl.color : '#6c63ff';
+    });
 
-    let sixMoBars = '', sixMoTicks = '';
-    let sixMoLastMo = -1;
-    for (let si = 0; si < sixMoN; si++) {
-      const sd  = sixMoDays[si];
-      const sdk = dateKey(sd);
-      const sh  = Object.keys(State.blocks[sdk] || {}).length * 0.5;
-      const scounts = {};
-      for (const b of Object.values(State.blocks[sdk] || {})) {
-        if (b && b.clientId) scounts[b.clientId] = (scounts[b.clientId] || 0) + 1;
-      }
-      const sTop = Object.entries(scounts).sort((a, b) => b[1] - a[1])[0];
-      const sCl  = sTop ? getClient(sTop[0]) : null;
-      const sCol = sCl ? sCl.color : '#6c63ff';
-      const sbH  = sh > 0 ? Math.max((sh / sixMoMax) * SIXMO_H, 2) : 0;
-      const sx   = si * sixMoBarW;
+    // 7-day trailing rolling average
+    const moRolling = moDailyH.map((_, i) => {
+      const sl = moDailyH.slice(Math.max(0, i - 6), i + 1);
+      return sl.reduce((s, v) => s + v, 0) / sl.length;
+    });
 
-      if (sbH > 0) {
-        sixMoBars += `<rect x="${sx.toFixed(2)}" y="${(SIXMO_H - sbH).toFixed(2)}" width="${Math.max(sixMoBarW - 0.5, 1).toFixed(2)}" height="${sbH.toFixed(2)}" fill="${sCol}" opacity="0.85" rx="0.5"/>`;
+    const moMaxH = Math.max(...moDailyH, 1);
+
+    // Faint raw-day bars (backdrop)
+    let moBarsStr = '';
+    for (let mi = 0; mi < moN; mi++) {
+      const bh = moDailyH[mi] > 0 ? Math.max((moDailyH[mi] / moMaxH) * MO_H, 1.5) : 0;
+      if (bh > 0) {
+        const sx = mi * moBW;
+        moBarsStr += `<rect x="${sx.toFixed(2)}" y="${(MO_H - bh).toFixed(2)}" width="${Math.max(moBW - 0.3, 1).toFixed(2)}" height="${bh.toFixed(2)}" fill="${moDailyCl[mi]}" opacity="0.18" rx="0.3"/>`;
       }
-      if (isToday(sd)) {
-        sixMoBars += `<line x1="${(sx + sixMoBarW / 2).toFixed(2)}" y1="0" x2="${(sx + sixMoBarW / 2).toFixed(2)}" y2="${SIXMO_H}" stroke="var(--accent)" stroke-width="1.5" opacity="0.5"/>`;
-      }
-      const sMo = sd.getMonth();
-      if (sMo !== sixMoLastMo) {
-        const sLbl = sd.toLocaleDateString('en-US', { month: 'short' });
-        sixMoTicks += `<line x1="${sx.toFixed(2)}" y1="0" x2="${sx.toFixed(2)}" y2="${SIXMO_H}" stroke="var(--border)" stroke-width="0.5"/>`;
-        sixMoTicks += `<text x="${(sx + 2).toFixed(2)}" y="${SIXMO_H + 11}" style="font-size:9px;fill:var(--text3);font-family:-apple-system,sans-serif">${sLbl}</text>`;
-        sixMoLastMo = sMo;
+    }
+
+    // Rolling average polyline + area (data already smooth, polyline looks clean)
+    const moLinePts  = moRolling.map((avg, i) => `${((i + 0.5) * moBW).toFixed(1)},${(MO_H - (avg / moMaxH) * MO_H).toFixed(1)}`).join(' ');
+    const moAreaPts  = `${(0.5 * moBW).toFixed(1)},${MO_H} ${moLinePts} ${((moN - 0.5) * moBW).toFixed(1)},${MO_H}`;
+    const moEndX     = ((moN - 0.5) * moBW).toFixed(1);
+    const moEndY     = (MO_H - (moRolling[moN - 1] / moMaxH) * MO_H).toFixed(1);
+
+    // Month boundary ticks + labels
+    let moTicksStr = '';
+    let moLastMo = -1;
+    for (let mi = 0; mi < moN; mi++) {
+      const md = moDays[mi];
+      const mmo = md.getMonth();
+      if (mmo !== moLastMo) {
+        const sx = mi * moBW;
+        const lbl = md.toLocaleDateString('en-US', { month: 'short' });
+        moTicksStr += `<line x1="${sx.toFixed(2)}" y1="0" x2="${sx.toFixed(2)}" y2="${MO_H}" stroke="#888" stroke-opacity="0.12" stroke-width="0.5"/>`;
+        moTicksStr += `<text x="${(sx + 2).toFixed(2)}" y="${MO_H + 11}" style="font-size:9px;fill:var(--text3);font-family:-apple-system,sans-serif">${lbl}</text>`;
+        moLastMo = mmo;
       }
     }
 
     html += `<div style="padding:16px 16px 0">
-      <div style="font-size:11px;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;color:var(--text2);margin-bottom:12px">6 Months</div>
+      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px">
+        <div style="font-size:11px;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;color:var(--text2)">Momentum</div>
+        <div style="font-size:10px;color:var(--text3)">7-day avg · 6 months</div>
+      </div>
       <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);padding:16px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
-        <svg width="${sixMoCardW}" height="${SIXMO_H + 16}" viewBox="0 0 ${sixMoCardW} ${SIXMO_H + 16}" style="display:block">
-          ${sixMoTicks}${sixMoBars}
+        <svg width="${moCardW}" height="${MO_H + 16}" viewBox="0 0 ${moCardW} ${MO_H + 16}" style="display:block;overflow:visible">
+          <defs>
+            <linearGradient id="moGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#6c63ff" stop-opacity="0.3"/>
+              <stop offset="100%" stop-color="#6c63ff" stop-opacity="0.02"/>
+            </linearGradient>
+          </defs>
+          ${moTicksStr}
+          ${moBarsStr}
+          <polygon points="${moAreaPts}" fill="url(#moGrad)"/>
+          <polyline points="${moLinePts}" fill="none" stroke="#6c63ff" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+          <circle cx="${moEndX}" cy="${moEndY}" r="2.5" fill="#6c63ff"/>
         </svg>
       </div>
     </div>`;
