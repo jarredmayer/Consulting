@@ -2004,14 +2004,14 @@ const App = {
     html += `<div class="card mb-0" style="padding:0">
       <div class="setting-row">
         <div class="setting-label">Time format</div>
-        <div style="display:flex;gap:6px">
+        <div class="fmt-group">
           <button class="fmt-btn${tf==='12h'?' seg-active':''}" onclick="App.setTimeFormat('12h')">12h</button>
           <button class="fmt-btn${tf==='24h'?' seg-active':''}" onclick="App.setTimeFormat('24h')">24h</button>
         </div>
       </div>
       <div class="setting-row">
         <div class="setting-label">Date format</div>
-        <div style="display:flex;gap:6px">
+        <div class="fmt-group">
           <button class="fmt-btn${df==='MDY'?' seg-active':''}" onclick="App.setDateFormat('MDY')">M/D/Y</button>
           <button class="fmt-btn${df==='DMY'?' seg-active':''}" onclick="App.setDateFormat('DMY')">D/M/Y</button>
         </div>

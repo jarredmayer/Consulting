@@ -234,8 +234,9 @@
     .time-block.empty { background: transparent; }
     .time-block.empty:active { background: rgba(0,0,0,0.04); transform: scale(0.98); }
     .time-block.drag-preview { background: rgba(108,99,255,0.15) !important; border-left: 3px solid rgba(108,99,255,0.6) !important; border-radius: 4px !important; transition: none; }
-    .fmt-btn { padding: 5px 12px; border-radius: 7px; font-size: 13px; font-weight: 500; border: 1px solid var(--border); background: transparent; color: var(--text2); cursor: pointer; font-family: var(--font); transition: all 0.15s; }
-    .fmt-btn.seg-active { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+    .fmt-group { display: inline-flex; background: var(--bg); border: 1px solid var(--border); border-radius: 9px; padding: 3px; gap: 2px; }
+    .fmt-btn { padding: 5px 14px; border-radius: 7px; font-size: 13px; font-weight: 500; border: none; background: transparent; color: var(--text2); cursor: pointer; font-family: var(--font); transition: all 0.15s; white-space: nowrap; }
+    .fmt-btn.seg-active { background: var(--accent); color: #fff; font-weight: 600; box-shadow: 0 1px 4px rgba(108,99,255,0.35); }
     .time-block.filled { cursor: pointer; }
     .time-block.filled:active { transform: scale(0.985); opacity: 0.88; }
     .time-block.calendar-event { cursor: default; opacity: 0.8; }
@@ -835,6 +836,6 @@
 <div id="toast"></div>
 
 <script src="seed-data.js?v=3"></script>
-<script src="app.js?v=24"></script>
+<script src="app.js?v=25"></script>
 </body>
 </html>
