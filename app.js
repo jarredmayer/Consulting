@@ -44,6 +44,9 @@ const State = {
   editingInvoiceYM:       null,
   editingInvoiceClientId: null,
   weeklyHoursTarget: 50,  // user-adjustable weekly hours upper bound
+  timeFormat: '12h',      // '12h' | '24h'
+  dateFormat: 'MDY',      // 'MDY' | 'DMY'
+  timezone:   '',         // '' = device default, or IANA tz string (display only)
 };
 
 // ── Local Storage helpers ──────────────────────────────────
@@ -97,19 +100,50 @@ function endOfMonth(d) {
   return new Date(d.getFullYear(), d.getMonth() + 1, 0);
 }
 
-function formatDate(d) {
-  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-}
-
-function formatShortDate(d) {
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
 function formatMonthYear(d) {
   return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
 
+// Respects State.timeFormat ('12h' | '24h')
+function formatTime(h, m) {
+  if ((State.timeFormat || '12h') === '24h') {
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  }
+  const hr = h > 12 ? h - 12 : h === 0 ? 12 : h;
+  const ap = h >= 12 ? 'pm' : 'am';
+  return m === 0 ? `${hr}${ap}` : `${hr}:${String(m).padStart(2,'0')}${ap}`;
+}
+
+function formatDate(d) {
+  const tz  = State.timezone || undefined;
+  const tzO = tz ? { timeZone: tz } : {};
+  if ((State.dateFormat || 'MDY') === 'DMY') {
+    const weekday = d.toLocaleDateString('en-US', { weekday: 'long', ...tzO });
+    const day     = d.toLocaleDateString('en-US', { day: 'numeric',  ...tzO });
+    const month   = d.toLocaleDateString('en-US', { month: 'long',   ...tzO });
+    return `${weekday}, ${day} ${month}`;
+  }
+  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', ...tzO });
+}
+
+function formatShortDate(d) {
+  const tz  = State.timezone || undefined;
+  const tzO = tz ? { timeZone: tz } : {};
+  if ((State.dateFormat || 'MDY') === 'DMY') {
+    const day   = d.toLocaleDateString('en-US', { day: 'numeric', ...tzO });
+    const month = d.toLocaleDateString('en-US', { month: 'short', ...tzO });
+    return `${day} ${month}`;
+  }
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...tzO });
+}
+
 function isToday(d) {
+  const tz = State.timezone;
+  if (tz) {
+    const dStr = d.toLocaleDateString('en-CA', { timeZone: tz });
+    const tStr = new Date().toLocaleDateString('en-CA', { timeZone: tz });
+    return dStr === tStr;
+  }
   const t = new Date();
   return d.getFullYear() === t.getFullYear() &&
          d.getMonth() === t.getMonth() &&
@@ -194,6 +228,9 @@ const Gist = {
       }
     }
     State.weeklyHoursTarget = parsed.weeklyHoursTarget || 50;
+    State.timeFormat = parsed.timeFormat || '12h';
+    State.dateFormat = parsed.dateFormat || 'MDY';
+    State.timezone   = parsed.timezone   || '';
   },
 
   async save() {
@@ -204,6 +241,9 @@ const Gist = {
       icalUrl:           State.icalUrl || null,
       invoices:          State.invoices,
       weeklyHoursTarget: State.weeklyHoursTarget,
+      timeFormat: State.timeFormat || '12h',
+      dateFormat: State.dateFormat || 'MDY',
+      timezone:   State.timezone   || '',
     };
     const res = await fetch(`https://api.github.com/gists/${State.gistId}`, {
       method: 'PATCH',
@@ -717,6 +757,66 @@ const App = {
         this.dayNav(dx < 0 ? 1 : -1);
       }
     }, { passive: true });
+    this.initDragCreate(el);
+  },
+
+  // ── Drag-to-create multi-slot blocks ─────────────────────
+  initDragCreate(container) {
+    let drag = null;
+
+    container.addEventListener('pointerdown', e => {
+      const block = e.target.closest('.time-block.empty[data-slot]');
+      if (!block) return;
+      drag = {
+        dk: block.dataset.dk, startSlot: block.dataset.slot,
+        endSlot: block.dataset.slot, startX: e.clientX, startY: e.clientY, moved: false,
+      };
+    });
+
+    container.addEventListener('pointermove', e => {
+      if (!drag) return;
+      const dx = Math.abs(e.clientX - drag.startX);
+      const dy = e.clientY - drag.startY;
+      if (dx > 16 && dx > Math.abs(dy)) { drag = null; this.clearDragPreview(); return; }
+      if (!drag.moved && dy < 14) return;
+      drag.moved = true;
+      const under = document.elementFromPoint(e.clientX, e.clientY);
+      const target = under && under.closest('.time-block[data-slot]');
+      if (target && target.dataset.dk === drag.dk && target.dataset.slot >= drag.startSlot) {
+        drag.endSlot = target.dataset.slot;
+        this.updateDragPreview(drag);
+      }
+      e.preventDefault();
+    }, { passive: false });
+
+    const finish = () => {
+      if (!drag) return;
+      const { dk, startSlot, endSlot, moved } = drag;
+      drag = null;
+      this.clearDragPreview();
+      if (moved && endSlot !== startSlot) {
+        const allSlots = [];
+        for (let h = DAY_START; h < DAY_END; h++)
+          for (let m = 0; m < 60; m += SLOT_MINS) allSlots.push(slotKey(h, m));
+        const duration = Math.max(1, allSlots.indexOf(endSlot) - allSlots.indexOf(startSlot) + 1);
+        this.openBlockModal(dk, startSlot, duration);
+      } else if (!moved) {
+        this.openBlockModal(dk, startSlot);
+      }
+    };
+    container.addEventListener('pointerup', finish);
+    container.addEventListener('pointercancel', () => { drag = null; this.clearDragPreview(); });
+  },
+
+  updateDragPreview({ dk, startSlot, endSlot }) {
+    document.querySelectorAll('.time-block.drag-preview').forEach(el => el.classList.remove('drag-preview'));
+    document.querySelectorAll(`.time-block.empty[data-dk="${dk}"][data-slot]`).forEach(el => {
+      if (el.dataset.slot >= startSlot && el.dataset.slot <= endSlot) el.classList.add('drag-preview');
+    });
+  },
+
+  clearDragPreview() {
+    document.querySelectorAll('.time-block.drag-preview').forEach(el => el.classList.remove('drag-preview'));
   },
 
   // ── Timeline rendering ───────────────────────────────────
@@ -808,7 +908,7 @@ const App = {
       const calEvts = calSlots[slot] || [];
       const { h, m } = parseSlot(slot);
       const r       = role[slot] || 'single';
-      const timeLabel = m === 0 ? `${h > 12 ? h - 12 : h}${h >= 12 ? 'pm' : 'am'}` : '';
+      const timeLabel = m === 0 ? formatTime(h, 0) : '';
       const isCont  = r === 'mid' || r === 'end';
       html += `<div class="time-row${isCont ? ' merge-cont' : ''}">
         <div class="time-label">${timeLabel}</div>
@@ -827,7 +927,7 @@ const App = {
       const radii   = { single: '8px', start: '8px 8px 0 0', mid: '0', end: '0 0 8px 8px' };
       const br      = radii[role] || '8px';
       const showContent = role === 'single' || role === 'start';
-      return `<div class="time-block filled"
+      return `<div class="time-block filled" data-dk="${dk}" data-slot="${slot}"
         style="background:${bg};border-left:3px solid ${color};color:${color};border-radius:${br}"
         onclick="App.openBlockModal('${dk}','${slot}')">
         ${showContent ? `<div class="time-block-content">
@@ -847,7 +947,7 @@ const App = {
         </div>
       </div>`;
     }
-    return `<div class="time-block empty" onclick="App.openBlockModal('${dk}','${slot}')"></div>`;
+    return `<div class="time-block empty" data-dk="${dk}" data-slot="${slot}"></div>`;
   },
 
   // ── Block modal ──────────────────────────────────────────
@@ -877,9 +977,9 @@ const App = {
     return allSlots.slice(start, end + 1);
   },
 
-  openBlockModal(dk, slot) {
+  openBlockModal(dk, slot, prefillDuration = 1) {
     State.editingBlock    = { date: dk, slot };
-    State.editingDuration = 1;
+    State.editingDuration = prefillDuration;
     State.editingRunSlots = null;
     const block = getBlock(dk, slot);
     const { h, m } = parseSlot(slot);
@@ -905,13 +1005,8 @@ const App = {
       const { h: fh, m: fm } = parseSlot(fSlot);
       const { h: lh, m: lm } = parseSlot(lSlot);
       const endMin = lh * 60 + lm + 30;
-      const fmtT = (th, tm) => {
-        const hr = th > 12 ? th - 12 : th === 0 ? 12 : th;
-        const ap = th >= 12 ? 'pm' : 'am';
-        return tm === 0 ? `${hr}${ap}` : `${hr}:${String(tm).padStart(2,'0')}${ap}`;
-      };
       document.getElementById('block-modal-title').textContent =
-        `${fmtT(fh, fm)} — ${fmtT(Math.floor(endMin / 60), endMin % 60)}`;
+        `${formatTime(fh, fm)} — ${formatTime(Math.floor(endMin / 60), endMin % 60)}`;
 
       clientSel.value = block.clientId || '';
       this.updateBlockProjectDropdown(block.clientId, block.projectId);
@@ -931,18 +1026,23 @@ const App = {
 
     } else {
       // ── New empty slot ──────────────────────────────
-      const hour   = h > 12 ? h - 12 : h;
-      const ampm   = h >= 12 ? 'pm' : 'am';
-      const minStr = m === 0 ? '' : `:${String(m).padStart(2,'0')}`;
-      document.getElementById('block-modal-title').textContent =
-        `${hour}${minStr}${ampm} — ${String(m + SLOT_MINS === 60 ? h + 1 : h > 12 ? h - 12 : h)
-          .replace(/^(\d)/, '$1')}:${String((m + SLOT_MINS) % 60).padStart(2,'0')}${h + (m + SLOT_MINS >= 60 ? 1 : 0) >= 12 ? 'pm' : 'am'}`;
-
       const maxSlots = Math.floor(((DAY_END * 60) - (h * 60 + m)) / 30);
       State.editingMaxDuration = maxSlots;
+      State.editingDuration    = Math.min(prefillDuration, maxSlots);
+
+      const endMin0 = h * 60 + m + State.editingDuration * 30;
+      document.getElementById('block-modal-title').textContent =
+        `${formatTime(h, m)} — ${formatTime(Math.floor(endMin0 / 60), endMin0 % 60)}`;
+
       document.getElementById('bm-notes').value = '';
 
-      if (durField) { durField.style.display = ''; document.getElementById('bm-dur-display').textContent = '30 min'; }
+      if (durField) {
+        durField.style.display = '';
+        const dm0 = State.editingDuration * 30;
+        const dh0 = Math.floor(dm0 / 60), dr0 = dm0 % 60;
+        document.getElementById('bm-dur-display').textContent =
+          dh0 === 0 ? `${dm0} min` : dr0 === 0 ? `${dh0}h` : `${dh0}h ${dr0}m`;
+      }
       if (runInfo)  runInfo.style.display = 'none';
       if (clearBtn) clearBtn.style.display = 'none';
       if (saveBtn)  saveBtn.textContent = 'Save';
@@ -971,10 +1071,15 @@ const App = {
   adjustDuration(delta) {
     State.editingDuration = Math.max(1, Math.min(State.editingMaxDuration || 60, (State.editingDuration || 1) + delta));
     const mins = State.editingDuration * 30;
-    const h = Math.floor(mins / 60);
-    const m = mins % 60;
+    const dh = Math.floor(mins / 60), dm = mins % 60;
     document.getElementById('bm-dur-display').textContent =
-      h === 0 ? `${mins} min` : m === 0 ? `${h}h` : `${h}h ${m}m`;
+      dh === 0 ? `${mins} min` : dm === 0 ? `${dh}h` : `${dh}h ${dm}m`;
+    // Update the title to reflect the new end time
+    const { date: dk, slot } = State.editingBlock;
+    const { h: sh, m: sm } = parseSlot(slot);
+    const endMin = sh * 60 + sm + State.editingDuration * 30;
+    document.getElementById('block-modal-title').textContent =
+      `${formatTime(sh, sm)} — ${formatTime(Math.floor(endMin / 60), endMin % 60)}`;
   },
 
   blockModalClientChange() {
@@ -1880,6 +1985,45 @@ const App = {
       </div>
     </div>`;
 
+    // Display section
+    const tf = State.timeFormat || '12h';
+    const df = State.dateFormat || 'MDY';
+    const tz = State.timezone   || '';
+    const TZ_LIST = [
+      ['', 'Device default'],
+      ['America/New_York','Eastern (ET)'],['America/Chicago','Central (CT)'],
+      ['America/Denver','Mountain (MT)'],['America/Los_Angeles','Pacific (PT)'],
+      ['America/Phoenix','Arizona'],['America/Anchorage','Alaska'],
+      ['Pacific/Honolulu','Hawaii'],['Europe/London','London (GMT/BST)'],
+      ['Europe/Paris','Paris (CET)'],['Europe/Berlin','Berlin (CET)'],
+      ['Asia/Kolkata','India (IST)'],['Asia/Singapore','Singapore (SGT)'],
+      ['Asia/Tokyo','Tokyo (JST)'],['Australia/Sydney','Sydney (AEST)'],
+      ['Pacific/Auckland','Auckland (NZST)'],
+    ];
+    html += `<div class="section-label">Display</div>`;
+    html += `<div class="card mb-0" style="padding:0">
+      <div class="setting-row">
+        <div class="setting-label">Time format</div>
+        <div style="display:flex;gap:6px">
+          <button class="fmt-btn${tf==='12h'?' seg-active':''}" onclick="App.setTimeFormat('12h')">12h</button>
+          <button class="fmt-btn${tf==='24h'?' seg-active':''}" onclick="App.setTimeFormat('24h')">24h</button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">Date format</div>
+        <div style="display:flex;gap:6px">
+          <button class="fmt-btn${df==='MDY'?' seg-active':''}" onclick="App.setDateFormat('MDY')">M/D/Y</button>
+          <button class="fmt-btn${df==='DMY'?' seg-active':''}" onclick="App.setDateFormat('DMY')">D/M/Y</button>
+        </div>
+      </div>
+      <div class="setting-row" style="border-bottom:none">
+        <div class="setting-label">Time zone</div>
+        <select class="input" style="width:auto;font-size:13px" onchange="App.setTimezone(this.value)">
+          ${TZ_LIST.map(([v,l]) => `<option value="${v}"${tz===v?' selected':''}>${l}</option>`).join('')}
+        </select>
+      </div>
+    </div>`;
+
     // Calendar section
     html += `<div class="section-label">Calendar</div>`;
     html += `<div class="card" style="padding:16px">
@@ -1962,6 +2106,27 @@ const App = {
     State.weeklyHoursTarget = val;
     await Gist.syncWithRetry();
     showToast('Target saved ✓');
+  },
+
+  async setTimeFormat(fmt) {
+    State.timeFormat = fmt;
+    await Gist.syncWithRetry();
+    this.renderSettings();
+    if (State.activeTab === 'today') this.renderToday();
+  },
+
+  async setDateFormat(fmt) {
+    State.dateFormat = fmt;
+    await Gist.syncWithRetry();
+    this.renderSettings();
+    if (State.activeTab === 'today') this.renderToday();
+  },
+
+  async setTimezone(tz) {
+    State.timezone = tz;
+    await Gist.syncWithRetry();
+    this.renderSettings();
+    if (State.activeTab === 'today') this.renderToday();
   },
 
   async saveIcal() {
