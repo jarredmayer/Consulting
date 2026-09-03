@@ -183,8 +183,17 @@ const Gist = {
     if (!res.ok) throw new Error(`Gist load failed: ${res.status}`);
     const data = await res.json();
     const file = data.files[GIST_FILENAME];
-    if (!file || !file.content) return;
-    const parsed = JSON.parse(file.content);
+    if (!file) return;
+    let content = file.content;
+    // GitHub truncates gist file content in the API response once the file
+    // exceeds ~900 KB. Fall back to raw_url for the full, untruncated file.
+    if (file.truncated && file.raw_url) {
+      const rawRes = await fetch(file.raw_url);
+      if (!rawRes.ok) throw new Error(`Gist raw load failed: ${rawRes.status}`);
+      content = await rawRes.text();
+    }
+    if (!content) return;
+    const parsed = JSON.parse(content);
     // Merge remote into State
     State.clients  = parsed.clients  || [];
     State.projects = parsed.projects || [];
@@ -250,7 +259,7 @@ const Gist = {
       headers: this.headers(),
       body: JSON.stringify({
         files: {
-          [GIST_FILENAME]: { content: JSON.stringify(payload, null, 2) }
+          [GIST_FILENAME]: { content: JSON.stringify(payload) }
         }
       }),
     });
@@ -272,7 +281,7 @@ const Gist = {
         description: 'Flow Time Tracker Data',
         public: false,
         files: {
-          [GIST_FILENAME]: { content: JSON.stringify(payload, null, 2) }
+          [GIST_FILENAME]: { content: JSON.stringify(payload) }
         }
       }),
     });
